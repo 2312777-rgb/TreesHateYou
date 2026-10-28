@@ -1,74 +1,86 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
 
+[RequireComponent(typeof(CharacterController))]
 public class PT_PlayerMovement : MonoBehaviour
 {
-    public CharacterController controller;
+    [Header("Movement")]
+    public float speed = 5f;
+    public float sprintSpeed = 8f;
 
-    public float speed = 3;
-    public float gravity = -9.18f;
-    public float jumpHeight = 3f;
+    [Header("Jump and gravity")]
+    public float gravity = -20f;
+    public float jumpHeight = 1.5f;
 
-    public Transform groundCheck;
-    public float groundDistance = 0.4f;
-    public LayerMask groundMask;
+    private CharacterController controller;
+    private Vector3 verticalVelocity;
 
-    Vector3 velocity;
-    bool isGrounded;
-
-    void Update()
+    private void Awake()
     {
-        isGrounded = Physics.CheckSphere(groundCheck.position, groundDistance, groundMask);
+        controller = GetComponent<CharacterController>();
+    }
 
-        if (isGrounded && velocity.y < 0)
+    private void Update()
+    {
+        if (controller == null)
         {
-            velocity.y = -2f;
+            return;
         }
 
-        // ── Input ────────────────────────────────────────────────────────────
-        float x        = 0f;
-        float z        = 0f;
-        bool  sprint   = false;
-        bool  jumpDown = false;
+        ReadInput(out Vector2 input, out bool jumpPressed, out bool sprintHeld);
+
+        bool isGrounded = controller.isGrounded;
+        if (isGrounded && verticalVelocity.y < 0f)
+        {
+            verticalVelocity.y = -2f;
+        }
+
+        Vector3 move = transform.right * input.x + transform.forward * input.y;
+        if (move.sqrMagnitude > 1f)
+        {
+            move.Normalize();
+        }
+
+        float currentSpeed = sprintHeld ? sprintSpeed : speed;
+        controller.Move(move * currentSpeed * Time.deltaTime);
+
+        if (jumpPressed && isGrounded)
+        {
+            verticalVelocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+        }
+
+        verticalVelocity.y += gravity * Time.deltaTime;
+        controller.Move(verticalVelocity * Time.deltaTime);
+    }
+
+    private static void ReadInput(out Vector2 movement, out bool jumpPressed, out bool sprintHeld)
+    {
+        movement = Vector2.zero;
+        jumpPressed = false;
+        sprintHeld = false;
 
 #if ENABLE_INPUT_SYSTEM
-        // New Input System (Unity 6 / package com.unity.inputsystem)
-        var kb = Keyboard.current;
-        if (kb != null)
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard == null)
         {
-            if (kb.wKey.isPressed) z  =  1f;
-            if (kb.sKey.isPressed) z  = -1f;
-            if (kb.aKey.isPressed) x  = -1f;
-            if (kb.dKey.isPressed) x  =  1f;
-
-            sprint   = kb.leftShiftKey.isPressed;
-            jumpDown = kb.spaceKey.wasPressedThisFrame;
+            return;
         }
+
+        if (keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed) movement.x -= 1f;
+        if (keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed) movement.x += 1f;
+        if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) movement.y -= 1f;
+        if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) movement.y += 1f;
+
+        jumpPressed = keyboard.spaceKey.wasPressedThisFrame;
+        sprintHeld = Mouse.current != null && Mouse.current.rightButton.isPressed;
 #elif ENABLE_LEGACY_INPUT_MANAGER
-        // Legacy Input Manager (Unity 2022 and earlier)
-        x        = Input.GetAxis("Horizontal");
-        z        = Input.GetAxis("Vertical");
-        sprint   = Input.GetKey(KeyCode.LeftShift);
-        jumpDown = Input.GetButtonDown("Jump");
+        movement = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+        jumpPressed = Input.GetButtonDown("Jump");
+        sprintHeld = Input.GetMouseButton(1);
 #endif
-        // ─────────────────────────────────────────────────────────────────────
-
-        speed = (sprint && isGrounded) ? 10f : 5f;
-
-        Vector3 move = transform.right * x + transform.forward * z;
-        controller.Move(move * speed * Time.deltaTime);
-
-        if (jumpDown && isGrounded)
-        {
-            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-        }
-
-        velocity.y += gravity * Time.deltaTime;
-        controller.Move(velocity * Time.deltaTime);
     }
 }
+
