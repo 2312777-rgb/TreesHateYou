@@ -47,6 +47,10 @@ Shader "Polytope Studio/PT_Vegetation_Plants_Shader"
 		#pragma shader_feature_local _SNOWONOFF_ON
 		#pragma shader_feature_local _TRANSLUCENCYONOFF_ON
 		#pragma multi_compile __ LOD_FADE_CROSSFADE
+		float4x4 _HomesteadGrassWorldToLocal;
+		float3 _HomesteadGrassMin;
+		float3 _HomesteadGrassMax;
+		float _HomesteadGrassMaskEnabled;
 		struct Input
 		{
 			float2 uv_texcoord;
@@ -176,6 +180,12 @@ Shader "Polytope Studio/PT_Vegetation_Plants_Shader"
 
 		void surf( Input i , inout SurfaceOutputStandardCustom o )
 		{
+			if (_HomesteadGrassMaskEnabled > 0.5)
+			{
+				float3 housePoint = mul(_HomesteadGrassWorldToLocal, float4(i.worldPos, 1)).xyz;
+				float3 insideHouse = step(_HomesteadGrassMin, housePoint) * step(housePoint, _HomesteadGrassMax);
+				clip(0.5 - insideHouse.x * insideHouse.y * insideHouse.z);
+			}
 			float2 uv_BaseTexture2 = i.uv_texcoord;
 			float4 tex2DNode2 = tex2D( _BaseTexture, uv_BaseTexture2 );
 			float clampResult738 = clamp( pow( ( i.uv_texcoord.y * _Gradient ) , _GradientPower ) , 0.0 , 1.0 );

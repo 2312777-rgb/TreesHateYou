@@ -20,6 +20,8 @@ public class PT_PlayerMovement : MonoBehaviour
 
     private void Awake()
     {
+        // The character body stays upright; pitch belongs to the camera only.
+        transform.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
         controller = GetComponent<CharacterController>();
     }
 

@@ -6496,6 +6496,11 @@ CapsuleCollider:
   m_Height: 5.957423
   m_Direction: 1
   m_Center: {x: 0, y: 2.454307, z: 0}
+--- !u!1 &107871633 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 902178734795641997, guid: 43b04f6daed982a4e8f12e6d462c0d6b, type: 3}
+  m_PrefabInstance: {fileID: 150879672}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &108096699
 GameObject:
   m_ObjectHideFlags: 0
@@ -8817,14 +8822,14 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 139766767}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.05518758, y: 0.76911163, z: 0.03489092, w: -0.6357707}
+  m_LocalRotation: {x: 0, y: 0.7715636, z: 0, w: -0.6361522}
   m_LocalPosition: {x: 55.95, y: 6.08, z: 49.59}
   m_LocalScale: {x: 0.8, y: 0.8, z: 0.8}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1589245845}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: -7.114, y: 259.011, z: 2.341}
+  m_LocalEulerAnglesHint: {x: 0, y: 259.011, z: 0}
 --- !u!114 &139766770
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9941,6 +9946,9 @@ PrefabInstance:
       insertIndex: 41
       addedObject: {fileID: 1768916463}
     m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 902178734795641997, guid: 43b04f6daed982a4e8f12e6d462c0d6b, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 333830911}
     - targetCorrespondingSourceObject: {fileID: 3670670322093315541, guid: 43b04f6daed982a4e8f12e6d462c0d6b, type: 3}
       insertIndex: -1
       addedObject: {fileID: 1948527672}
@@ -19526,6 +19534,18 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 3582551197536221026, guid: 43b04f6daed982a4e8f12e6d462c0d6b, type: 3}
   m_PrefabInstance: {fileID: 150879672}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &333830911
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 107871633}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9d942a8355fbbc049aeca4e637005831, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InteriorGrassMask
 --- !u!1 &334236339
 GameObject:
   m_ObjectHideFlags: 0
@@ -27935,6 +27955,37 @@ CapsuleCollider:
   m_Height: 5.957423
   m_Direction: 1
   m_Center: {x: 0, y: 2.454307, z: 0}
+--- !u!1 &466668628
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 466668629}
+  m_Layer: 0
+  m_Name: Homestead Interior - Grass Cleared
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &466668629
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 466668628}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 59.287792, y: 4.283726, z: 44.632656}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &466719528
 GameObject:
   m_ObjectHideFlags: 0
@@ -104226,6 +104277,37 @@ CapsuleCollider:
   m_Height: 5.957423
   m_Direction: 1
   m_Center: {x: 0, y: 2.454307, z: 0}
+--- !u!1 &1831798445
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1831798446}
+  m_Layer: 0
+  m_Name: Homestead Foundation - Leveled
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1831798446
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1831798445}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 59.287792, y: 4.142908, z: 44.632656}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1831950571
 GameObject:
   m_ObjectHideFlags: 0
@@ -121157,3 +121239,5 @@ SceneRoots:
   - {fileID: 727779147}
   - {fileID: 607704903}
   - {fileID: 1954140836}
+  - {fileID: 1831798446}
+  - {fileID: 466668629}

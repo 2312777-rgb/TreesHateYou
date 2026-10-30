@@ -17,6 +17,11 @@ public class DailyStoryController : MonoBehaviour
     private GameObject workbench;
     private GameObject woodStorage;
     private StorageWoodDisplay storageDisplay;
+    private const float DialogueDuration = 5f;
+    private const float DialogueFadeDuration = 0.65f;
+    private int dialogueStage = -1;
+    private string dialogue;
+    private float dialogueUntil;
     private bool sunsetStarted;
     private bool sunsetRunning;
     private Material originalSky;
@@ -142,6 +147,7 @@ public class DailyStoryController : MonoBehaviour
             sunsetStarted = true;
             StartCoroutine(Sunset());
         }
+        UpdateDialogue();
         if (IsTransitioning || Cursor.lockState != CursorLockMode.Locked) return;
 #if ENABLE_INPUT_SYSTEM
         bool pressed = Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
@@ -184,6 +190,67 @@ public class DailyStoryController : MonoBehaviour
         }
     }
 
+    private void UpdateDialogue()
+    {
+        if (IsTransitioning) return;
+        int stage;
+        string line;
+        if (Progress.FurnitureCrafted)
+        {
+            stage = 9;
+            line = "Chiếc ghế đầu tiên đã xong. Căn nhà này đang dần trở thành tổ ấm của mình.";
+        }
+        else if (Progress.Day == 2 && Progress.DayTwoWoodDeposited >= DailyStoryProgress.FurnitureCost)
+        {
+            stage = 8;
+            line = "Đủ gỗ rồi. Đến bàn cưa và nhấn E để chế tạo một chiếc ghế thôi.";
+        }
+        else if (Progress.Day == 2)
+        {
+            stage = 7;
+            line = "Hôm nay mình sẽ làm thêm đồ dùng. Chặt cây, mang 5 khúc gỗ mới về thùng rồi đến bàn cưa.";
+        }
+        else if (Progress.FireLit)
+        {
+            stage = 6;
+            line = "Lửa đã cháy, ấm hơn rồi. Giờ có thể về giường nghỉ ngơi để mai tiếp tục.";
+        }
+        else if (Progress.IsNight)
+        {
+            stage = 5;
+            line = "Trời đang tối dần và bắt đầu lạnh. Về lò sưởi, nhấn E để dùng 3 khúc gỗ trong kho nhóm lửa.";
+        }
+        else if (Progress.DepositedWood > 0)
+        {
+            stage = 4;
+            line = "Gỗ đã nằm gọn trong thùng. Mình cần chặt đủ 3 cây thông và cất tổng cộng 9 khúc gỗ trước đêm.";
+        }
+        else if (collector != null && collector.IsCarryingWood)
+        {
+            stage = 3;
+            line = "Mang khúc gỗ này về thùng dụng cụ. Nhìn vào thùng và nhấn E để quăng gỗ vào.";
+        }
+        else if (Progress.TreesCut > 0)
+        {
+            stage = 2;
+            line = "Đợi cây đổ thành củi, rồi đến gần từng khúc gỗ và nhấn E để cầm bằng tay trái.";
+        }
+        else if (reticle != null && reticle.IsHoldingItem)
+        {
+            stage = 1;
+            line = "Tìm một cây thông, đứng gần thân cây và nhấn chuột trái để chặt. Mình cần 3 cây cho hôm nay.";
+        }
+        else
+        {
+            stage = 0;
+            line = "Đêm nay chắc sẽ lạnh. Rời giường, đến thùng dụng cụ và nhấn E để lấy rìu trước đã.";
+        }
+        // A later milestone supersedes an obsolete instruction; completed hints never repeat.
+        if (stage <= dialogueStage) return;
+        dialogueStage = stage;
+        dialogue = line;
+        dialogueUntil = Time.time + DialogueDuration;
+    }
     private IEnumerator Sunset()
     {
         sunsetRunning = true;
@@ -299,21 +366,24 @@ public class DailyStoryController : MonoBehaviour
     private void OnGUI()
     {
         if (collector == null) return;
-        float width = Mathf.Min(360f, Screen.width * 0.42f);
-        Rect panel = new Rect(Screen.width - width - 20f, 20f, width, 190f);
-        GUI.Box(panel, GUIContent.none);
-        GUIStyle heading = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold, wordWrap = true };
-        GUIStyle text = new GUIStyle(GUI.skin.label) { fontSize = 16, wordWrap = true };
-        string title = Progress.Day == 1 ? "Ngày 1 — Giữ ấm căn nhà" : "Ngày 2 — Dựng xây cuộc sống";
-        string objective = Progress.Day == 1
-            ? Progress.FireLit ? "Lửa đã cháy. Căn nhà cuối cùng cũng ấm lên.\nTrở về giường ngủ để sang ngày 2."
-                : !Progress.IsNight ? "Tranh thủ ban ngày tích trữ gỗ cho đêm lạnh.\nCây thông: " + Progress.TreesCut + "/3\nGỗ đã cất: " + Mathf.Min(Progress.DepositedWood, 9) + "/9\nMang gỗ đến thùng dụng cụ và nhấn E để cất."
-                    : sunsetRunning ? "Gỗ đã được cất đủ. Trời đang tối dần..."
-                    : "Đêm đã xuống. Trở về nhóm lò để giữ ấm.\nDùng 3 gỗ trong kho để đốt lửa.\nGỗ trong kho: " + Progress.StoredWood
-            : Progress.FurnitureCrafted ? "Chiếc ghế đầu tiên đã hoàn thành.\nCăn nhà bắt đầu trở thành tổ ấm."
-                : "Hôm nay, hãy làm căn nhà tiện nghi hơn.\nMang 5 gỗ mới về thùng, rồi đến bàn cưa chế tạo ghế.\nGỗ đã cất hôm nay: " + Mathf.Min(Progress.DayTwoWoodDeposited, 5) + "/5";
-        GUI.Label(new Rect(panel.x + 14f, panel.y + 10f, width - 28f, 32f), title, heading);
-        GUI.Label(new Rect(panel.x + 14f, panel.y + 48f, width - 28f, 138f), objective, text);
+        if (!IsTransitioning && Time.time < dialogueUntil && !string.IsNullOrEmpty(dialogue))
+        {
+            float remaining = dialogueUntil - Time.time;
+            float elapsed = DialogueDuration - remaining;
+            float alpha = Mathf.SmoothStep(0f, 1f,
+                Mathf.Clamp01(Mathf.Min(elapsed, remaining) / DialogueFadeDuration));
+            float width = Mathf.Min(820f, Screen.width - 40f);
+            GUIStyle subtitle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.Clamp(Mathf.RoundToInt(Screen.height * 0.027f), 18, 28),
+                wordWrap = true,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1f, 1f, 1f, alpha) }
+            };
+            float height = subtitle.CalcHeight(new GUIContent(dialogue), width - 32f) + 24f;
+            Rect panel = new Rect((Screen.width - width) * 0.5f, Screen.height - 145f - height, width, height);
+            GUI.Label(new Rect(panel.x + 16f, panel.y + 12f, width - 32f, height - 24f), dialogue, subtitle);
+        }
         if (HasInteractionPrompt)
         {
             int cost = Progress.Day == 1 ? DailyStoryProgress.FirewoodCost : DailyStoryProgress.FurnitureCost;
