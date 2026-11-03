@@ -1,23 +1,48 @@
 public class DailyStoryProgress
 {
     public const int FirewoodCost = 3;
-    public const int FurnitureCost = 5;
+    public const int FurnitureCost = 3;
     public const int RequiredTrees = 3;
     public const int RequiredStoredWood = 9;
     public int TreesCut { get; private set; }
     public int StoredWood { get; private set; }
     public int DepositedWood { get; private set; }
     public int DayTwoWoodDeposited { get; private set; }
+    public int WorkbenchWood { get; private set; }
+    public void DeliverWorkbenchWood()
+    {
+        if (Day == 2 && !FurnitureCrafted && WorkbenchWood < FurnitureCost) WorkbenchWood++;
+    }
     public bool IsNight { get; private set; }
     public int Day { get; private set; } = 1;
     public bool FireLit { get; private set; }
+    public int HearthWood { get; private set; }
+    public bool AxeReturned { get; private set; }
+    public void SetAxeReturned(bool returned)
+    {
+        AxeReturned = returned;
+        CheckNight();
+    }
+
+    public bool WithdrawWood()
+    {
+        if (StoredWood <= 0) return false;
+        StoredWood--;
+        return true;
+    }
+
+    public void LoadHearthWood()
+    {
+        if (!FireLit && HearthWood < FirewoodCost) HearthWood++;
+        CheckNight();
+    }
     public bool FurnitureCrafted { get; private set; }
     public bool CanSleepToNextDay => Day == 1 && FireLit;
 
     public bool LightFire(int availableWood)
     {
-        if (Day != 1 || !IsNight || FireLit || StoredWood < FirewoodCost) return false;
-        StoredWood -= FirewoodCost;
+        if (Day != 1 || !IsNight || FireLit || HearthWood < FirewoodCost) return false;
+        HearthWood -= FirewoodCost;
         FireLit = true;
         return true;
     }
@@ -41,7 +66,8 @@ public class DailyStoryProgress
 
     private void CheckNight()
     {
-        if (Day == 1 && TreesCut >= RequiredTrees && DepositedWood >= RequiredStoredWood)
+        if (Day == 1 && TreesCut >= RequiredTrees && DepositedWood >= RequiredStoredWood &&
+            AxeReturned && HearthWood >= FirewoodCost)
             IsNight = true;
     }
 
@@ -55,9 +81,8 @@ public class DailyStoryProgress
 
     public bool CraftFurniture(int availableWood)
     {
-        if (Day != 2 || FurnitureCrafted || availableWood < FurnitureCost ||
-            StoredWood < FurnitureCost || DayTwoWoodDeposited < FurnitureCost) return false;
-        StoredWood -= FurnitureCost;
+        if (Day != 2 || FurnitureCrafted || WorkbenchWood < FurnitureCost) return false;
+        WorkbenchWood -= FurnitureCost;
         FurnitureCrafted = true;
         return true;
     }

@@ -52,17 +52,19 @@ public class StorageWoodDisplay : MonoBehaviour
             bool longX = crateBounds.size.x >= crateBounds.size.z;
             float width = longX ? crateBounds.size.x : crateBounds.size.z;
             float depth = longX ? crateBounds.size.z : crateBounds.size.x;
-            float length = depth * 0.42f;
-            float factor = length / Mathf.Max(model.size.z, 0.01f);
+            // Match the 1.15 metre logs spawned by FallingTreeVisual.
+            float parentScale = Mathf.Max(Mathf.Abs(transform.lossyScale.x),
+                Mathf.Abs(transform.lossyScale.y), Mathf.Abs(transform.lossyScale.z));
+            float factor = 1.15f / (Mathf.Max(model.size.x, model.size.y, model.size.z, 0.01f) * parentScale);
             log.transform.localScale = Vector3.one * factor;
-            log.transform.localRotation = Quaternion.Euler(0f, longX ? 0f : 90f, index % 2 == 0 ? 2f : -2f);
+            log.transform.localRotation = Quaternion.Euler(0f, longX ? 90f : 0f, index % 2 == 0 ? 2f : -2f);
             int column = index % 3;
             int layer = index / 3;
             Vector3 center = crateBounds.center;
-            float along = (column - 1) * width * 0.24f;
-            float back = depth * 0.2f;
-            center.x += longX ? along : back;
-            center.z += longX ? back : along;
+            float along = (column - 1) * Mathf.Min(depth * 0.25f, model.size.x * factor * 1.1f);
+            float back = 0f;
+            center.x += longX ? back : along;
+            center.z += longX ? along : back;
             center.y = crateBounds.min.y + crateBounds.size.y * 0.18f + model.size.y * factor * (0.5f + layer);
             Vector3 modelCenter = log.transform.InverseTransformPoint(mesh.transform.TransformPoint(model.center));
             log.transform.localPosition = center - log.transform.localRotation * Vector3.Scale(modelCenter, log.transform.localScale);

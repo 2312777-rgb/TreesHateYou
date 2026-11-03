@@ -13,6 +13,14 @@ public class PT_MouseLook : MonoBehaviour
     public Transform playerBody;
 
     private float xRotation = 0f;
+    private int resetFrame = -1;
+
+    public void SetPitch(float pitch)
+    {
+        xRotation = Mathf.Clamp(pitch, -90f, 90f);
+        transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
+        resetFrame = Time.frameCount;
+    }
 
     void Start()
     {
@@ -21,6 +29,7 @@ public class PT_MouseLook : MonoBehaviour
 
     void Update()
     {
+        if (Time.frameCount == resetFrame) return;
         // ── Input ────────────────────────────────────────────────────────────
         float mouseX = 0f;
         float mouseY = 0f;

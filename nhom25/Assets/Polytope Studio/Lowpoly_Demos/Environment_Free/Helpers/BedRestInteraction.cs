@@ -25,6 +25,7 @@ public class BedRestInteraction : MonoBehaviour
     private Renderer bedRenderer;
 
     private bool isResting;
+    public bool IsResting => isResting;
     private bool movementWasEnabled;
     private bool controllerWasEnabled;
     private bool mouseLookWasEnabled;
@@ -95,6 +96,8 @@ public class BedRestInteraction : MonoBehaviour
 
     private void GetIntoBed()
     {
+        FurniturePlacement furniture = player.GetComponent<FurniturePlacement>();
+        if (furniture != null && furniture.IsHolding) return;
         if (itemReticle != null && itemReticle.IsHoldingItem) return;
         FirewoodCollector wood = player.GetComponent<FirewoodCollector>();
         if (wood != null && (wood.IsCarryingWood || wood.IsThrowing)) return;
@@ -156,19 +159,88 @@ public class BedRestInteraction : MonoBehaviour
             return;
         }
 
-        player.position = savedPlayerPosition;
-        player.rotation = savedPlayerRotation;
+        if (!TryFindBedsidePosition(out Vector3 exitPosition))
+        {
+            Debug.LogWarning("BedRestInteraction: No clear floor beside the bed; staying in bed.", this);
+            return;
+        }
+        player.position = exitPosition;
+        player.rotation = Quaternion.Euler(0f, savedPlayerRotation.eulerAngles.y, 0f);
         if (playerCamera != null)
         {
             playerCamera.transform.localPosition = savedCameraLocalPosition;
-            playerCamera.transform.localRotation = savedCameraLocalRotation;
+            Bounds bed = GetBedBounds();
+            Vector3 target = new Vector3(bed.center.x, bed.max.y, bed.center.z);
+            Vector3 direction = target - playerCamera.transform.position;
+            Vector3 horizontal = Vector3.ProjectOnPlane(direction, Vector3.up);
+            if (horizontal.sqrMagnitude > 0.001f)
+                player.rotation = Quaternion.LookRotation(horizontal, Vector3.up);
+            // Synchronize mouse-look's pitch so its next Update preserves this view.
+            direction = target - playerCamera.transform.position;
+            float pitch = -Mathf.Atan2(direction.y,
+                Vector3.ProjectOnPlane(direction, Vector3.up).magnitude) * Mathf.Rad2Deg;
+            if (mouseLook != null) mouseLook.SetPitch(pitch);
+            else playerCamera.transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
         }
 
         if (characterController != null) characterController.enabled = controllerWasEnabled;
-        if (movement != null) movement.enabled = movementWasEnabled;
+        if (movement != null)
+        {
+            movement.ResetAfterTeleport();
+            movement.enabled = movementWasEnabled;
+        }
         if (mouseLook != null) mouseLook.enabled = mouseLookWasEnabled;
 
         isResting = false;
+    }
+
+    private bool TryFindBedsidePosition(out Vector3 position)
+    {
+        Bounds bed = GetBedBounds();
+        Vector3 right = Vector3.ProjectOnPlane(transform.right, Vector3.up).normalized;
+        Vector3 forward = Vector3.Cross(right, Vector3.up).normalized;
+        Vector3 scale = player.lossyScale;
+        float radius = characterController != null
+            ? characterController.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z)) : 0.35f;
+        float height = characterController != null
+            ? Mathf.Max(characterController.height * Mathf.Abs(scale.y), radius * 2f) : 1.8f;
+        Vector3 center = characterController != null
+            ? Quaternion.Euler(0f, savedPlayerRotation.eulerAngles.y, 0f) * Vector3.Scale(characterController.center, scale)
+            : Vector3.up * height * 0.5f;
+        float sideExtent = Mathf.Abs(right.x) * bed.extents.x + Mathf.Abs(right.z) * bed.extents.z;
+        float lengthExtent = Mathf.Abs(forward.x) * bed.extents.x + Mathf.Abs(forward.z) * bed.extents.z;
+        // Prefer the side closest to where the player entered, then try the opposite side.
+        if (Vector3.Dot(savedPlayerPosition - bed.center, right) < 0f) right = -right;
+        Physics.SyncTransforms();
+        for (int side = 0; side < 2; side++)
+        for (int offset = 0; offset < 3; offset++)
+        {
+            float along = offset == 0 ? 0f : (offset == 1 ? -0.45f : 0.45f) * lengthExtent;
+            Vector3 candidate = bed.center + right * (side == 0 ? 1f : -1f) * (sideExtent + radius + 0.15f)
+                + forward * along;
+            RaycastHit[] floors = Physics.RaycastAll(new Vector3(candidate.x, bed.max.y + 0.5f, candidate.z),
+                Vector3.down, bed.size.y + 3f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(floors, (a, b) => a.distance.CompareTo(b.distance));
+            foreach (RaycastHit floor in floors)
+            {
+                if (floor.transform.IsChildOf(player) || floor.transform.IsChildOf(transform) || floor.normal.y < 0.8f) continue;
+                // Furniture tops must not be mistaken for the room's floor.
+                if (floor.point.y > bed.min.y + 0.2f) continue;
+                Vector3 capsuleCenter = new Vector3(candidate.x, floor.point.y + height * 0.5f + 0.025f, candidate.z);
+                float halfSegment = height * 0.5f - radius;
+                Collider[] obstacles = Physics.OverlapCapsule(capsuleCenter + Vector3.up * halfSegment,
+                    capsuleCenter - Vector3.up * halfSegment, radius, Physics.DefaultRaycastLayers,
+                    QueryTriggerInteraction.Ignore);
+                bool blocked = false;
+                foreach (Collider obstacle in obstacles)
+                    if (!obstacle.transform.IsChildOf(player)) { blocked = true; break; }
+                if (blocked) continue;
+                position = capsuleCenter - center;
+                return true;
+            }
+        }
+        position = default;
+        return false;
     }
 
     private bool IsPlayerNearBed()

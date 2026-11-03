@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using System.Collections.Generic;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -23,8 +24,21 @@ public class WorldItemReticle : MonoBehaviour
     private Sprite solidSprite;
     private Transform heldItem;
     public bool IsHoldingItem => heldItem != null;
+    public bool IsHoldingAxe => heldItem != null && heldItem.name == "Lumberjack_Axe";
+    public bool IsHoldingHammer => heldItem != null && heldItem.name == "Lumberjack_Hammer_Display";
+    public bool IsHammerStored { get; private set; } = true;
+    public string HeldItemTitle => heldItem != null ? GetItemTitle(heldItem.name) : "dụng cụ";
+    private struct ShelfPose
+    {
+        public Transform Parent;
+        public Vector3 Position;
+        public Quaternion Rotation;
+        public Vector3 Scale;
+    }
+    private readonly Dictionary<Transform, ShelfPose> shelfPoses = new Dictionary<Transform, ShelfPose>();
     public bool HasToolPickupTarget => heldItem == null && TryGetPickupTarget(out _);
     public int LastPickupFrame { get; private set; } = -1;
+    public int LastReleaseFrame { get; private set; } = -1;
     private Rigidbody heldBody;
     private Collider[] heldColliders;
     private bool[] colliderStates;
@@ -60,6 +74,13 @@ public class WorldItemReticle : MonoBehaviour
         axeRenderer = FindRenderer("Lumberjack_Axe");
         hammerRenderer = FindRenderer("Lumberjack_Hammer_Display");
         pickaxeRenderer = FindRenderer("Lumberjack_Pickaxe_Display");
+        foreach (Renderer toolRenderer in new[] { axeRenderer, hammerRenderer, pickaxeRenderer })
+        {
+            if (toolRenderer == null) continue;
+            Transform tool = toolRenderer.transform;
+            shelfPoses[tool] = new ShelfPose { Parent = tool.parent, Position = tool.position,
+                Rotation = tool.rotation, Scale = tool.localScale };
+        }
 
         // All identified tools use the same aim-to-pick-up interaction.
         if (axeRenderer != null)
@@ -73,6 +94,8 @@ public class WorldItemReticle : MonoBehaviour
 
     private void Update()
     {
+        FurniturePlacement furniture = GetComponent<FurniturePlacement>();
+        if (furniture != null && (furniture.IsHolding || furniture.LastInteractionFrame == Time.frameCount)) return;
         hoveredTitle = null;
         hoveredDescription = null;
 
@@ -82,7 +105,12 @@ public class WorldItemReticle : MonoBehaviour
             if (heldItem.name == "Lumberjack_Axe") chopping.ShowTarget(chopping.FindTarget(playerCamera));
             else if (heldItem.name == "Lumberjack_Pickaxe_Display")
                 chopping.ShowStumpTarget(chopping.FindStumpTarget(playerCamera));
-            if (DropPressed()) DropItem();
+            if (DropPressed() && (firewoodCollector == null ||
+                (!firewoodCollector.IsCarryingWood && firewoodCollector.LastDropFrame != Time.frameCount)))
+            {
+                LastReleaseFrame = Time.frameCount;
+                if (story == null || !story.TryStoreHeldTool()) DropItem();
+            }
             else
             {
                 if (!isSwinging && SwingPressed() && Cursor.lockState == CursorLockMode.Locked)
@@ -159,6 +187,8 @@ public class WorldItemReticle : MonoBehaviour
 
     private void PickUpItem(Transform item)
     {
+        if (item.name == "Lumberjack_Hammer_Display") IsHammerStored = false;
+        if (item.name == "Lumberjack_Axe" && story != null) story.Progress.SetAxeReturned(false);
         LastPickupFrame = Time.frameCount;
         heldItem = item;
         heldWorldScale = item.lossyScale;
@@ -215,6 +245,10 @@ public class WorldItemReticle : MonoBehaviour
             {
                 chopping.DigStump(playerCamera);
             }
+            else if (heldItem.name == "Lumberjack_Hammer_Display" && story != null)
+            {
+                story.HammerWorkbench();
+            }
         }
         Quaternion windup = Quaternion.Euler(-32f, 12f, -18f);
         Quaternion strike = Quaternion.Euler(65f, -22f, 18f);
@@ -252,6 +286,24 @@ public class WorldItemReticle : MonoBehaviour
         Vector3 grip = new Vector3(0.38f, -0.48f, 0.65f);
         heldItem.localPosition = grip + offset * (heldRestPosition - grip) + translation;
         heldItem.localRotation = offset * heldRestRotation;
+    }
+
+    public bool ReturnToolToShelf()
+    {
+        if (heldItem == null || !shelfPoses.TryGetValue(heldItem, out ShelfPose pose)) return false;
+        if (IsHoldingHammer) IsHammerStored = true;
+        isSwinging = false;
+        chopping.ShowTarget(null);
+        heldItem.SetParent(pose.Parent, true);
+        heldItem.SetPositionAndRotation(pose.Position, pose.Rotation);
+        heldItem.localScale = pose.Scale;
+        for (int i = 0; i < heldColliders.Length; i++)
+            if (heldColliders[i] != null) heldColliders[i].enabled = colliderStates[i];
+        heldBody.isKinematic = true;
+        heldBody.useGravity = false;
+        heldItem = null;
+        LastPickupFrame = Time.frameCount;
+        return true;
     }
 
     private void DropItem()
@@ -302,10 +354,9 @@ public class WorldItemReticle : MonoBehaviour
     private static bool DropPressed()
     {
 #if ENABLE_INPUT_SYSTEM
-        return Keyboard.current != null && (Keyboard.current.leftShiftKey.wasPressedThisFrame ||
-            Keyboard.current.rightShiftKey.wasPressedThisFrame);
+        return Keyboard.current != null && Keyboard.current.gKey.wasPressedThisFrame;
 #elif ENABLE_LEGACY_INPUT_MANAGER
-        return Input.GetKeyDown(KeyCode.LeftShift) || Input.GetKeyDown(KeyCode.RightShift);
+        return Input.GetKeyDown(KeyCode.G);
 #else
         return false;
 #endif
@@ -436,6 +487,8 @@ private void UpdateInfoPanel()
 
     private void OnGUI()
     {
+        FurniturePlacement furniture = GetComponent<FurniturePlacement>();
+        if (furniture != null && (furniture.IsHolding || furniture.HasPickupTarget)) return;
         if (story != null && (story.IsTransitioning || story.HasInteractionPrompt)) return;
         if (firewoodCollector != null && (firewoodCollector.HasPickupTarget ||
             (firewoodCollector.IsCarryingWood && !HasToolPickupTarget))) return;
@@ -451,7 +504,7 @@ private void UpdateInfoPanel()
             fontSize = 18,
             alignment = TextAnchor.MiddleCenter
         };
-        string prompt = heldItem != null ? "Nhấn Shift để thả đồ" : "Nhấn E để cầm đồ vật";
+        string prompt = heldItem != null ? "Nhấn G để thả dụng cụ" : "Nhấn E để cầm đồ vật";
         GUI.Box(new Rect(Screen.width * 0.5f - 110f, Screen.height - 90f, 220f, 40f), prompt, style);
     }
 }

@@ -15,6 +15,7 @@ public class LumberjackDoorInteract : MonoBehaviour
     private Vector3 hingePoint;
     private float currentAngle;
     private float targetAngle;
+    public bool IsFullyClosed => Mathf.Abs(currentAngle) < 0.5f && Mathf.Abs(targetAngle) < 0.5f;
     public bool IsInteractionPromptVisible
     {
         get

@@ -9,14 +9,20 @@ public class PT_PlayerMovement : MonoBehaviour
 {
     [Header("Movement")]
     public float speed = 5f;
-    public float sprintSpeed = 8f;
+    public float sprintSpeed = 7f;
 
-    [Header("Jump and gravity")]
+    [Header("Gravity")]
     public float gravity = -20f;
-    public float jumpHeight = 1.5f;
 
     private CharacterController controller;
     private Vector3 verticalVelocity;
+    private int teleportFrame = -1;
+
+    public void ResetAfterTeleport()
+    {
+        verticalVelocity = Vector3.zero;
+        teleportFrame = Time.frameCount;
+    }
 
     private void Awake()
     {
@@ -27,12 +33,12 @@ public class PT_PlayerMovement : MonoBehaviour
 
     private void Update()
     {
-        if (controller == null)
+        if (controller == null || Time.frameCount == teleportFrame)
         {
             return;
         }
 
-        ReadInput(out Vector2 input, out bool jumpPressed, out bool sprintHeld);
+        ReadInput(out Vector2 input, out bool sprintHeld);
 
         bool isGrounded = controller.isGrounded;
         if (isGrounded && verticalVelocity.y < 0f)
@@ -49,19 +55,13 @@ public class PT_PlayerMovement : MonoBehaviour
         float currentSpeed = sprintHeld ? sprintSpeed : speed;
         controller.Move(move * currentSpeed * Time.deltaTime);
 
-        if (jumpPressed && isGrounded)
-        {
-            verticalVelocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-        }
-
         verticalVelocity.y += gravity * Time.deltaTime;
         controller.Move(verticalVelocity * Time.deltaTime);
     }
 
-    private static void ReadInput(out Vector2 movement, out bool jumpPressed, out bool sprintHeld)
+    private static void ReadInput(out Vector2 movement, out bool sprintHeld)
     {
         movement = Vector2.zero;
-        jumpPressed = false;
         sprintHeld = false;
 
 #if ENABLE_INPUT_SYSTEM
@@ -76,11 +76,9 @@ public class PT_PlayerMovement : MonoBehaviour
         if (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed) movement.y -= 1f;
         if (keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed) movement.y += 1f;
 
-        jumpPressed = keyboard.spaceKey.wasPressedThisFrame;
         sprintHeld = Mouse.current != null && Mouse.current.rightButton.isPressed;
 #elif ENABLE_LEGACY_INPUT_MANAGER
         movement = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
-        jumpPressed = Input.GetButtonDown("Jump");
         sprintHeld = Input.GetMouseButton(1);
 #endif
     }

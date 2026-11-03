@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class ChoppableTree : MonoBehaviour
 {
-    public const int RequiredHits = 10;
+    public const int RequiredHits = 1;
     public int Hits { get; private set; }
     public bool IsCut { get; private set; }
     public Terrain SourceTerrain;
