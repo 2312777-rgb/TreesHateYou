@@ -14,20 +14,23 @@ public class DailyStoryController : MonoBehaviour
     private WorldItemReticle reticle;
     private Camera view;
     private GameObject fireplace;
-    private GameObject workbench;
-    private WorkbenchWoodDisplay workbenchDisplay;
     private FurniturePlacement furniturePlacement;
-    private const int CraftRequiredHits = 5;
-    private int craftHits;
-    private float craftBarUntil;
     private GameObject woodStorage;
     private GameObject toolShelf;
     private StorageWoodDisplay storageDisplay;
-    private const float DialogueDuration = 5f;
     private const float DialogueFadeDuration = 0.65f;
-    private string dialogue;
-    private float dialogueUntil;
-    private float sleepReminderUntil;
+    private const float BedtimeThoughtDuration = 2f;
+    private float bedtimeThoughtUntil;
+    private const float StoryLineDuration = 5f;
+    private int lastStoryBeat = -1;
+    private bool leftBedOnFirstDay;
+    private bool leftBedOnSecondDay;
+    private string pendingStoryFollowUp;
+    private string storyLine;
+    private float storyLineUntil;
+    private int firstDayStumpsCleared;
+    private bool redAfternoon;
+    private Color daylightSunColor;
     private GameObject sleepOverlay;
     private UnityEngine.UI.Image sleepBackground;
     private UnityEngine.UI.Text sleepCaption;
@@ -52,12 +55,13 @@ public class DailyStoryController : MonoBehaviour
     private readonly List<Light> roomFillLights = new List<Light>();
     private Coroutine hearthLightFade;
     private const float HearthLightIntensity = 1.8f;
-    private const float HearthLightFadeSeconds = 5f;
+    private const float EveningFadeSeconds = 5f;
     private AudioSource[] fireSounds;
     private readonly List<GameObject> fireplaceRoots = new List<GameObject>();
 
     private void Start()
     {
+        if (GetComponent<ForestWarningNote>() == null) gameObject.AddComponent<ForestWarningNote>();
         collector = GetComponent<FirewoodCollector>();
         reticle = GetComponent<WorldItemReticle>();
         view = GetComponentInChildren<Camera>();
@@ -65,13 +69,7 @@ public class DailyStoryController : MonoBehaviour
         if (furniturePlacement == null) furniturePlacement = gameObject.AddComponent<FurniturePlacement>();
         fireplace = GameObject.Find("Lumberjack_Fireplace");
         FireplaceCollisionSetup.Ensure(fireplace);
-        workbench = GameObject.Find("Lumberjack_Interior_Table");
-        if (workbench != null)
-        {
-            workbenchDisplay = workbench.GetComponent<WorkbenchWoodDisplay>();
-            if (workbenchDisplay == null) workbenchDisplay = workbench.AddComponent<WorkbenchWoodDisplay>();
-            workbenchDisplay.SetCount(Progress.WorkbenchWood);
-        }
+        PlaceChairUnderTable();
         woodStorage = GameObject.Find("Lumberjack_Supply_Crate");
         toolShelf = GameObject.Find("Lumberjack_Interior_Shelf");
         if (woodStorage != null)
@@ -86,6 +84,7 @@ public class DailyStoryController : MonoBehaviour
             foreach (Light light in FindObjectsByType<Light>(FindObjectsSortMode.None))
                 if (light.type == LightType.Directional) { sun = light; break; }
         daylightIntensity = sun != null ? sun.intensity : 1f;
+        daylightSunColor = sun != null ? sun.color : Color.white;
         daylightAmbient = RenderSettings.ambientLight;
         daylightAmbientMode = RenderSettings.ambientMode;
         daylightSkyColor = RenderSettings.ambientSkyColor;
@@ -119,8 +118,15 @@ public class DailyStoryController : MonoBehaviour
         SetFire(false);
     }
 
+    private bool CanUseHearth => !Progress.FireLit &&
+        (Progress.Day == 1 || (Progress.Day == 2 && lastStoryBeat == 15 && !IsTransitioning));
+
     private GameObject Target()
     {
+        ForestWarningNote warning = GetComponent<ForestWarningNote>();
+        if (warning != null && (warning.IsHeld || warning.LastPlacementFrame == Time.frameCount))
+            return !sunsetRunning && reticle != null && reticle.IsHoldingItem && IsAimingAtObject(toolShelf)
+                ? toolShelf : null;
         if (furniturePlacement != null && (furniturePlacement.IsHolding || furniturePlacement.HasPickupTarget ||
             furniturePlacement.LastInteractionFrame == Time.frameCount)) return null;
         if (view == null || collector == null || collector.IsThrowing || collector.HasPickupTarget ||
@@ -129,43 +135,22 @@ public class DailyStoryController : MonoBehaviour
         if (sunsetRunning) return null;
         if (reticle != null && reticle.IsHoldingItem && IsAimingAtObject(toolShelf)) return toolShelf;
         if (IsAimingAtObject(woodStorage)) return woodStorage;
-        if (Progress.Day == 1 && !Progress.FireLit)
+        if (CanUseHearth)
         {
             foreach (GameObject root in fireplaceRoots)
                 if (CanReachFireplace(root)) return root;
             return null;
         }
-        GameObject target = Progress.Day == 2 && !Progress.FurnitureCrafted ? workbench : null;
-        return CanReachObject(target) ? target : null;
+        return null;
     }
 
-    public bool TryStoreHeldTool()
+    private bool TryStoreHeldTool()
     {
         if (IsTransitioning || Cursor.lockState != CursorLockMode.Locked || reticle == null ||
             !reticle.IsHoldingItem || !IsAimingAtObject(toolShelf)) return false;
         bool returningAxe = reticle.IsHoldingAxe;
         if (!reticle.ReturnToolToShelf()) return false;
         if (returningAxe) Progress.SetAxeReturned(true);
-        return true;
-    }
-
-    private bool CanReachObject(GameObject target)
-    {
-        if (target == null || view == null) return false;
-        Vector3 point = target.transform.position + Vector3.up * 0.4f;
-        Renderer renderer = target.GetComponent<Renderer>();
-        if (renderer != null) point = renderer.bounds.center;
-        Vector3 offset = point - view.transform.position;
-        if (offset.magnitude > 3f || Vector3.Dot(view.transform.forward, offset.normalized) < 0.82f) return false;
-        RaycastHit[] hits = Physics.RaycastAll(view.transform.position, offset.normalized, offset.magnitude,
-            Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
-        foreach (RaycastHit hit in hits)
-        {
-            if (hit.transform.IsChildOf(transform) || hit.transform.IsChildOf(target.transform)) continue;
-            // The fireplace's stone surround may be part of the house mesh. Only
-            // reject obstacles well in front of the intended interaction point.
-            if (hit.distance < offset.magnitude - 0.6f) return false;
-        }
         return true;
     }
 
@@ -216,12 +201,7 @@ public class DailyStoryController : MonoBehaviour
 
     private void Update()
     {
-        if (Progress.IsNight && !sunsetStarted)
-        {
-            sunsetStarted = true;
-            StartCoroutine(Sunset());
-        }
-        UpdateDialogue();
+        if (!IsTransitioning) UpdateStoryLine();
         if (IsTransitioning || Cursor.lockState != CursorLockMode.Locked) return;
 #if ENABLE_INPUT_SYSTEM
         bool pressed = Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
@@ -237,6 +217,7 @@ public class DailyStoryController : MonoBehaviour
         if ((!pressed && !takePressed) || target == null) return;
         if (target == toolShelf)
         {
+            if (pressed) TryStoreHeldTool();
             return;
         }
         if (target == woodStorage)
@@ -257,170 +238,168 @@ public class DailyStoryController : MonoBehaviour
             });
             return;
         }
-        if (!pressed) return;
-        if (Progress.Day == 1)
+        if (CanUseHearth)
         {
             if (Progress.HearthWood < DailyStoryProgress.FirewoodCost)
             {
+                if (!pressed) return;
                 collector.ThrowIntoStorage(target.transform, () => Progress.LoadHearthWood(),
                     DailyStoryProgress.FirewoodCost - Progress.HearthWood);
                 return;
             }
-            if (Progress.IsNight && Progress.LightFire(Progress.StoredWood))
+            if (takePressed && Progress.LightFire(Progress.StoredWood))
             {
                 SetFire(true);
+                if (Progress.Day == 1)
+                    StartCoroutine(SunsetAfterFire());
+                else
+                {
+                    storyLine = "Bên ngoài đã xảy ra chuyện gì đó. Mình cần ra ngoài kiểm tra.";
+                    storyLineUntil = Time.unscaledTime + StoryLineDuration;
+                }
                 if (storageDisplay != null) storageDisplay.SetCount(Progress.StoredWood);
+            }
+        }
+    }
+
+    public void OnPlayerLeftBed()
+    {
+        if (Progress.Day == 1) leftBedOnFirstDay = true;
+        else if (Progress.Day == 2) leftBedOnSecondDay = true;
+        UpdateStoryLine();
+    }
+
+    private void UpdateStoryLine()
+    {
+        if (pendingStoryFollowUp != null)
+        {
+            if (Time.unscaledTime < storyLineUntil) return;
+            storyLine = pendingStoryFollowUp;
+            pendingStoryFollowUp = null;
+            storyLineUntil = Time.unscaledTime + StoryLineDuration;
+            return;
+        }
+
+        int beat;
+        string line;
+        if (redAfternoon)
+        {
+            ForestWarningNote warning = GetComponent<ForestWarningNote>();
+            if (lastStoryBeat >= 14)
+            {
+                if (lastStoryBeat == 14 && Time.unscaledTime >= storyLineUntil && !IsTransitioning)
+                {
+                    lastStoryBeat = 15;
+                    StartCoroutine(ShowEarthquake());
+                }
+                if (lastStoryBeat == 15 && Progress.FireLit && Time.unscaledTime >= storyLineUntil && IsOutsideHouse())
+                {
+                    lastStoryBeat = 16;
+                    storyLine = "Những cái cây bên ngoài đã biến thành một khu rừng đáng sợ. Mình thấy lo về chuyện sắp xảy ra.";
+                    storyLineUntil = Time.unscaledTime + StoryLineDuration;
+                }
+                if (lastStoryBeat == 16 && Time.unscaledTime >= storyLineUntil)
+                {
+                    lastStoryBeat = 17;
+                    storyLine = "Tôi có cảm giác tảng đá này là lời giải thích cho những chuyện đang diễn ra. Mình cần tiến lại gần để kiểm tra.";
+                    storyLineUntil = Time.unscaledTime + StoryLineDuration;
+                }
+                return;
+            }
+            if (lastStoryBeat == 13)
+            {
+                if (warning == null || !warning.IsOnTable || reticle == null ||
+                    !reticle.IsPickaxeStored || !AreDoorsClosed()) return;
+                beat = 14;
+                line = "Bây giờ có chuyện gì đó đang diễn ra, và tôi nghĩ mình đang gặp nguy hiểm.";
+            }
+            else if (warning != null && warning.HasLoweredAfterReading)
+            {
+                beat = 13;
+                line = "Mình cần cất cái cuốc, đặt lời cảnh báo này lên bàn rồi đi đóng cửa lại.";
+            }
+            else if (lastStoryBeat == 11 && Time.unscaledTime >= storyLineUntil &&
+                warning != null && warning.IsNearEntranceNote)
+            {
+                beat = 12;
+                line = "Có gì đó kỳ lạ ngay trước cửa nhà. Mình cầm lên xem thử.";
+            }
+            else
+            {
+                beat = 11;
+                line = "Tôi có cảm giác bất an về chuyện này. Mình cần phải về nhà trú ẩn.";
             }
         }
         else if (Progress.Day == 2)
         {
-            if (Progress.WorkbenchWood < DailyStoryProgress.FurnitureCost)
-            {
-                collector.ThrowIntoStorage(workbench.transform, () =>
-                {
-                    Progress.DeliverWorkbenchWood();
-                    if (workbenchDisplay != null) workbenchDisplay.SetCount(Progress.WorkbenchWood);
-                }, DailyStoryProgress.FurnitureCost - Progress.WorkbenchWood, true);
-                return;
-            }
-
+            bool readyForCleanupLine = leftBedOnSecondDay && lastStoryBeat >= 9 &&
+                Time.unscaledTime >= storyLineUntil;
+            beat = readyForCleanupLine ? 10 : 9;
+            line = readyForCleanupLine
+                ? "Mình cần dọn những gốc cây đã chặt hôm qua. Đi lấy cuốc để dọn thôi."
+                : "Trời đã sáng. Vậy mà khu rừng vẫn im lặng như đêm qua.";
         }
-    }
-
-    private enum DialogueTask
-    {
-        LeaveBed, TakeAxe, ChopTree, CollectLogs, StoreLogs, GatherRemainingWood, ReturnAxe, TakeHearthLogs,
-        LoadHearth, WaitForNight, LightFire, CloseDoors, Sleep, TakeHammer, TakeCraftLogs,
-        StackCraftLogs, HammerChair, PutHammerAway, PickUpChair, PlaceChair, Finished
-    }
-    private DialogueTask currentDialogueTask = DialogueTask.LeaveBed;
-    private bool taskDialogueShown;
-    private int depositGoal;
-    private int treeGoal;
-
-    private void SetDialogueTask(DialogueTask task)
-    {
-        currentDialogueTask = task;
-        taskDialogueShown = false;
-        if (task == DialogueTask.ChopTree)
+        else if (Progress.IsNight)
         {
-            treeGoal = Mathf.Min(Progress.DepositedWood / 3 + 1, DailyStoryProgress.RequiredTrees);
-            depositGoal = Mathf.Min((Progress.DepositedWood / 3 + 1) * 3, DailyStoryProgress.RequiredStoredWood);
+            bool doorsClosed = AreDoorsClosed();
+            beat = doorsClosed ? 8 : 7;
+            line = doorsClosed
+                ? "Đúng là một ngày dài. Bây giờ mình cần lên giường nghỉ ngơi."
+                : "Mình cần đóng cửa thật kỹ trước khi đi ngủ.";
         }
+        else if (Progress.FireLit)
+        {
+            beat = 6;
+            line = "Lửa đã bén. Trời đang tối dần.";
+        }
+        else if (Progress.DepositedWood >= DailyStoryProgress.RequiredStoredWood)
+        {
+            beat = 4;
+            line = "Củi đã đủ cho đêm nay. Sao mình vẫn thấy bất an nhỉ?";
+        }
+        else if (Progress.TreesCut >= DailyStoryProgress.RequiredTrees && lastStoryBeat >= 2)
+        {
+            if (Time.unscaledTime < storyLineUntil && lastStoryBeat == 2) return;
+            beat = 3;
+            line = "Đã chặt đủ cây rồi. Mình cần về nhà cất rìu, rồi quay lại thu thập gỗ cho vào kho.";
+        }
+        else if (Progress.TreesCut > 0)
+        {
+            beat = 2;
+            line = "Cây vừa đổ, cả khu rừng bỗng im bặt.";
+        }
+        else if (leftBedOnFirstDay)
+        {
+            beat = 1;
+            line = "Mình cần chuẩn bị củi để tối nay ấm hơn. Đi lấy rìu chặt cây thôi.";
+        }
+        else
+        {
+            beat = 0;
+            line = "Đêm đầu tiên ở căn nhà này lạnh hơn mình tưởng.";
+        }
+        if (beat <= lastStoryBeat) return;
+        lastStoryBeat = beat;
+        storyLine = line;
+        storyLineUntil = Time.unscaledTime + StoryLineDuration;
+        if (beat == 2) pendingStoryFollowUp = "Mình cần chặt đủ 3 cây cho hôm nay.";
+        if (beat == 4)
+            pendingStoryFollowUp = $"Sắp đến đêm rồi. Mình cần chuẩn bị lò sưởi. Lấy {DailyStoryProgress.FirewoodCost} khúc gỗ cho vào lò để căn phòng ấm hơn tối nay.";
     }
 
-    private void UpdateDialogue()
+    private IEnumerator SunsetAfterFire()
     {
-        if (IsTransitioning || Time.time < sleepReminderUntil) return;
-        if (Progress.Day == 2 && currentDialogueTask < DialogueTask.TakeHammer)
-            SetDialogueTask(DialogueTask.TakeHammer);
-        if (Progress.Day == 1 && currentDialogueTask == DialogueTask.Sleep && !AreDoorsClosed())
-            SetDialogueTask(DialogueTask.CloseDoors);
-
-        // Completion immediately replaces the current instruction. Otherwise its
-        // display timer may expire while this task remains pending.
-        if (taskDialogueShown)
+        sunsetStarted = true;
+        yield return Sunset();
+        EnsureHearthRoomLight();
+        if (hearthRoomLight != null)
         {
-            if (!DialogueTaskComplete()) return;
-            DialogueTask next = currentDialogueTask + 1;
-            if (currentDialogueTask == DialogueTask.StoreLogs)
-                next = Progress.DepositedWood >= DailyStoryProgress.RequiredStoredWood &&
-                    Progress.TreesCut >= DailyStoryProgress.RequiredTrees
-                    ? DialogueTask.ReturnAxe : DialogueTask.GatherRemainingWood;
-            if (currentDialogueTask == DialogueTask.Sleep || currentDialogueTask == DialogueTask.Finished) return;
-            SetDialogueTask(next);
+            hearthLightFade = StartCoroutine(FadeHearthLight());
+            yield return hearthLightFade;
         }
-        if (currentDialogueTask == DialogueTask.Finished && taskDialogueShown) return;
-        string line;
-        switch (currentDialogueTask)
-        {
-            case DialogueTask.LeaveBed:
-                line = "Một ngày mới bắt đầu. Nhấn Space để rời giường."; break;
-            case DialogueTask.TakeAxe:
-                line = "Đến kệ dụng cụ, nhìn vào rìu và nhấn E để lấy."; break;
-            case DialogueTask.ChopTree:
-                line = Progress.TreesCut == 0
-                    ? "Ra ngoài tìm một cây thông. Đứng gần thân cây và nhấn chuột trái để chặt."
-                    : "Tiếp tục chặt một cây thông nữa bằng chuột trái."; break;
-            case DialogueTask.CollectLogs:
-                line = "Đợi cây đổ thành củi. Nhấn F để nhặt đủ 3 khúc gỗ."; break;
-            case DialogueTask.StoreLogs:
-                line = "Mang gỗ về thùng, nhìn vào thùng rồi nhấn E để cất."; break;
-            case DialogueTask.GatherRemainingWood:
-                line = "Mình đã biết cách thu thập gỗ rồi. Hãy chặt đủ tổng cộng 3 cây thông và cất đủ 9 khúc gỗ vào kho."; break;
-            case DialogueTask.ReturnAxe:
-                line = "Đủ gỗ rồi, đã đến lúc nghỉ ngơi. Mang rìu đến kệ và nhấn G để cất."; break;
-            case DialogueTask.TakeHearthLogs:
-                line = "Chuẩn bị củi cho buổi tối. Nhìn vào kho và nhấn F lấy 3 khúc gỗ."; break;
-            case DialogueTask.LoadHearth:
-                line = "Mang 3 khúc củi đến lò, nhìn vào lò và nhấn E để cho củi vào."; break;
-            case DialogueTask.WaitForNight:
-                line = "Mọi thứ đã sẵn sàng. Trời đang tối dần..."; break;
-            case DialogueTask.LightFire:
-                line = "Đêm đã xuống. Nhìn vào lò và nhấn E để nhóm lửa."; break;
-            case DialogueTask.CloseDoors:
-                line = "Lửa đã cháy. Đóng cửa thật kỹ trước khi đi ngủ."; break;
-            case DialogueTask.Sleep:
-                line = "Cửa đã đóng kín. Trở về giường và nhấn E để ngủ."; break;
-            case DialogueTask.TakeHammer:
-                line = "Hôm nay mình sẽ làm một chiếc ghế gỗ. Đến kệ, nhìn vào búa và nhấn E để lấy."; break;
-            case DialogueTask.TakeCraftLogs:
-                line = "Nhìn vào kho và nhấn F để lấy 3 khúc gỗ làm ghế."; break;
-            case DialogueTask.StackCraftLogs:
-                line = "Mang gỗ đến bàn tròn, nhìn vào bàn rồi nhấn E để xếp đủ 3 khúc lên bàn."; break;
-            case DialogueTask.HammerChair:
-                line = "Gỗ đã đủ. Cầm búa, nhìn vào bàn và nhấn chuột trái để đóng ghế."; break;
-            case DialogueTask.PutHammerAway:
-                line = "Ghế gỗ đã xong. Mang búa về kệ và nhấn G để cất."; break;
-            case DialogueTask.PickUpChair:
-                line = "Quay lại bàn, nhìn vào ghế và nhấn E để cầm lên."; break;
-            case DialogueTask.PlaceChair:
-                line = "Chọn một bề mặt trống, nhìn xuống chỗ muốn đặt rồi nhấn G để đặt ghế."; break;
-            default:
-                line = "Chiếc ghế đã được đặt vào chỗ. Căn nhà tiện nghi hơn rồi."; break;
-        }
-        dialogue = line;
-        dialogueUntil = Time.time + DialogueDuration;
-        taskDialogueShown = true;
+        Progress.FinishSunset();
     }
 
-    private bool DialogueTaskComplete()
-    {
-        switch (currentDialogueTask)
-        {
-            case DialogueTask.LeaveBed:
-                foreach (BedRestInteraction bed in FindObjectsByType<BedRestInteraction>())
-                    if (bed.IsResting) return false;
-                return true;
-            case DialogueTask.TakeAxe: return (reticle != null && reticle.IsHoldingAxe) || Progress.TreesCut > 0;
-            case DialogueTask.ChopTree: return Progress.TreesCut >= treeGoal;
-            case DialogueTask.CollectLogs:
-                return Progress.DepositedWood >= depositGoal || (collector != null &&
-                    collector.CarriedWoodCount >= Mathf.Min(3, depositGoal - Progress.DepositedWood));
-            case DialogueTask.StoreLogs: return Progress.DepositedWood >= depositGoal;
-            case DialogueTask.GatherRemainingWood:
-                return Progress.TreesCut >= DailyStoryProgress.RequiredTrees &&
-                    Progress.DepositedWood >= DailyStoryProgress.RequiredStoredWood;
-            case DialogueTask.ReturnAxe: return Progress.AxeReturned;
-            case DialogueTask.TakeHearthLogs: return Progress.IsNight || Progress.FireLit || Progress.HearthWood >= 3 ||
-                (collector != null && collector.CarriedWoodCount >= 3 - Progress.HearthWood);
-            case DialogueTask.LoadHearth: return Progress.HearthWood >= 3 || Progress.IsNight || Progress.FireLit;
-            case DialogueTask.WaitForNight: return Progress.IsNight && sunsetStarted && !sunsetRunning;
-            case DialogueTask.LightFire: return Progress.FireLit;
-            case DialogueTask.CloseDoors: return AreDoorsClosed();
-            case DialogueTask.Sleep: return Progress.Day == 2;
-            case DialogueTask.TakeHammer: return Progress.FurnitureCrafted || Progress.WorkbenchWood > 0 ||
-                (reticle != null && reticle.IsHoldingHammer);
-            case DialogueTask.TakeCraftLogs: return Progress.FurnitureCrafted || Progress.WorkbenchWood >= 3 ||
-                (collector != null && collector.CarriedWoodCount >= 3 - Progress.WorkbenchWood);
-            case DialogueTask.StackCraftLogs: return Progress.WorkbenchWood >= 3 || Progress.FurnitureCrafted;
-            case DialogueTask.HammerChair: return Progress.FurnitureCrafted;
-            case DialogueTask.PutHammerAway: return reticle != null && reticle.IsHammerStored && !reticle.IsHoldingItem;
-            case DialogueTask.PickUpChair: return furniturePlacement != null && furniturePlacement.HasPickedUpChair;
-            case DialogueTask.PlaceChair: return furniturePlacement != null && furniturePlacement.HasPlacedChair;
-            default: return false;
-        }
-    }
     private IEnumerator Sunset()
     {
         sunsetRunning = true;
@@ -431,10 +410,10 @@ public class DailyStoryController : MonoBehaviour
         }
         float exposure = nightSky != null && nightSky.HasProperty("_Exposure") ? nightSky.GetFloat("_Exposure") : 1f;
         float elapsed = 0f;
-        while (elapsed < 5f)
+        while (elapsed < EveningFadeSeconds)
         {
             elapsed += Time.deltaTime;
-            float t = Mathf.SmoothStep(0f, 1f, elapsed / 5f);
+            float t = Mathf.SmoothStep(0f, 1f, elapsed / EveningFadeSeconds);
             if (sun != null) sun.intensity = Mathf.Lerp(daylightIntensity, 0.06f, t);
             RenderSettings.ambientLight = Color.Lerp(daylightAmbient, new Color(0.08f, 0.1f, 0.17f), t);
             RenderSettings.ambientIntensity = Mathf.Lerp(daylightAmbientIntensity, 0.15f, t);
@@ -463,7 +442,11 @@ public class DailyStoryController : MonoBehaviour
         RenderSettings.ambientLight = daylightAmbient;
         RenderSettings.ambientIntensity = daylightAmbientIntensity;
         RenderSettings.fogColor = daylightFog;
-        if (sun != null) sun.intensity = daylightIntensity;
+        if (sun != null)
+        {
+            sun.intensity = daylightIntensity;
+            sun.color = daylightSunColor;
+        }
         if (nightSky != null) { Destroy(nightSky); nightSky = null; }
         DynamicGI.UpdateEnvironment();
     }
@@ -505,12 +488,7 @@ public class DailyStoryController : MonoBehaviour
             else sound.Stop();
         }
         if (hearthLightFade != null) { StopCoroutine(hearthLightFade); hearthLightFade = null; }
-        if (lit)
-        {
-            EnsureHearthRoomLight();
-            if (hearthRoomLight != null) hearthLightFade = StartCoroutine(FadeHearthLight());
-        }
-        else if (hearthRoomLight != null)
+        if (!lit && hearthRoomLight != null)
         {
             hearthRoomLight.intensity = 0f;
             hearthRoomLight.enabled = false;
@@ -598,13 +576,13 @@ public class DailyStoryController : MonoBehaviour
         foreach (Light light in roomFillLights) if (light != null) light.enabled = true;
         float start = hearthRoomLight.intensity;
         float elapsed = 0f;
-        while (elapsed < HearthLightFadeSeconds && hearthRoomLight != null)
+        while (elapsed < EveningFadeSeconds && hearthRoomLight != null)
         {
             elapsed += Time.deltaTime;
             hearthRoomLight.intensity = Mathf.Lerp(start, HearthLightIntensity,
-                Mathf.SmoothStep(0f, 1f, elapsed / HearthLightFadeSeconds));
+                Mathf.SmoothStep(0f, 1f, elapsed / EveningFadeSeconds));
             foreach (Light light in roomFillLights)
-                if (light != null) light.intensity = 1.4f * Mathf.SmoothStep(0f, 1f, elapsed / HearthLightFadeSeconds);
+                if (light != null) light.intensity = 1.4f * Mathf.SmoothStep(0f, 1f, elapsed / EveningFadeSeconds);
             yield return null;
         }
         if (hearthRoomLight != null) hearthRoomLight.intensity = HearthLightIntensity;
@@ -613,64 +591,49 @@ public class DailyStoryController : MonoBehaviour
         // Only this local light changes; the night sky, sun and ambient lighting stay dark.
     }
 
-    private GameObject CreateChair(GameObject prefab)
+    private void PlaceChairUnderTable()
     {
-        Renderer benchRenderer = workbench.GetComponent<Renderer>();
-        Vector3 center = benchRenderer != null ? benchRenderer.bounds.center : workbench.transform.position;
-        Vector3 towardPlayer = Vector3.ProjectOnPlane(transform.position - center, Vector3.up).normalized;
-        if (towardPlayer.sqrMagnitude < 0.1f) towardPlayer = Vector3.forward;
-        Vector3 position = center;
-        position.y = benchRenderer != null ? benchRenderer.bounds.max.y : position.y;
-        GameObject chair = Instantiate(prefab, position, Quaternion.LookRotation(towardPlayer));
-        chair.name = "Crafted Wooden Chair";
-        Renderer[] renderers = chair.GetComponentsInChildren<Renderer>();
-        if (renderers.Length == 0) { Destroy(chair); return null; }
-        Bounds bounds = renderers[0].bounds;
-        foreach (Renderer renderer in renderers) bounds.Encapsulate(renderer.bounds);
-        chair.transform.localScale *= 0.55f / Mathf.Max(bounds.size.y, 0.01f);
-        bounds = renderers[0].bounds;
-        foreach (Renderer renderer in renderers) bounds.Encapsulate(renderer.bounds);
-        chair.transform.position += Vector3.up * (position.y - bounds.min.y + 0.02f);
+        GameObject table = GameObject.Find("Lumberjack_Interior_Table");
+        GameObject prefab = Resources.Load<GameObject>("Story/WoodenChair");
+        if (table == null || prefab == null) return;
+        Renderer tabletop = table.GetComponent<Renderer>();
+        if (tabletop == null) return;
 
-        bounds = FurniturePlacement.BoundsOf(chair.transform);
-        chair.transform.position += Vector3.up * (position.y - bounds.min.y + 0.02f);
+        Bounds tableBounds = tabletop.bounds;
+        Vector3 outward = Vector3.ProjectOnPlane(transform.position - tableBounds.center, Vector3.up).normalized;
+        if (outward == Vector3.zero) outward = table.transform.forward;
+        Vector3 position = tableBounds.center + outward * Mathf.Min(tableBounds.extents.x, tableBounds.extents.z) * 0.65f;
+        position.y = tableBounds.min.y;
+        GameObject chair = Instantiate(prefab, position, Quaternion.LookRotation(outward));
+        chair.name = "Wooden Chair";
+        Bounds chairBounds = FurniturePlacement.BoundsOf(chair.transform);
+        chair.transform.localScale *= Mathf.Min(0.55f, tableBounds.size.y * 0.8f) / Mathf.Max(chairBounds.size.y, 0.01f);
+        chairBounds = FurniturePlacement.BoundsOf(chair.transform);
+        chair.transform.position += Vector3.up * (position.y - chairBounds.min.y + 0.01f);
         chair.AddComponent<CraftedFurniture>();
         if (chair.GetComponentInChildren<Collider>() == null)
             foreach (MeshFilter mesh in chair.GetComponentsInChildren<MeshFilter>())
                 if (mesh.sharedMesh != null) mesh.gameObject.AddComponent<MeshCollider>().sharedMesh = mesh.sharedMesh;
-        return chair;
-    }
-
-    public void HammerWorkbench()
-    {
-        if (IsTransitioning || Progress.Day != 2 || Progress.FurnitureCrafted ||
-            Progress.WorkbenchWood < DailyStoryProgress.FurnitureCost || reticle == null ||
-            !reticle.IsHoldingHammer || !IsAimingAtObject(workbench)) return;
-        craftHits = Mathf.Min(craftHits + 1, CraftRequiredHits);
-        craftBarUntil = Time.time + 2f;
-        if (craftHits < CraftRequiredHits) return;
-        GameObject prefab = Resources.Load<GameObject>("Story/WoodenChair");
-        if (prefab == null) { craftHits = CraftRequiredHits - 1; return; }
-        GameObject chair = CreateChair(prefab);
-        if (chair == null) { craftHits = CraftRequiredHits - 1; return; }
-        if (Progress.CraftFurniture(Progress.WorkbenchWood))
-        {
-            if (workbenchDisplay != null) workbenchDisplay.SetCount(0);
-        }
-        else Destroy(chair);
     }
 
     public void SleepToNextDay()
     {
-        if (IsTransitioning) return;
-        if (Progress.IsNight && !AreDoorsClosed())
-        {
-            dialogue = "Mình phải đóng cửa thật kỹ trước khi ngủ. Ra đóng cửa rồi hãy quay lại nghỉ ngơi.";
-            dialogueUntil = Time.time + DialogueDuration;
-            sleepReminderUntil = dialogueUntil;
-            return;
-        }
+        if (IsTransitioning || sunsetRunning) return;
+        if (Progress.IsNight && !AreDoorsClosed()) return;
         if (!IsTransitioning && Progress.CanSleepToNextDay) StartCoroutine(NextMorning());
+    }
+
+    private bool IsOutsideHouse()
+    {
+        GameObject house = GameObject.Find("medieval_house_lite_v2");
+        if (house == null) return false;
+        foreach (LumberjackDoorInteract door in FindObjectsByType<LumberjackDoorInteract>())
+        {
+            Vector3 doorway = door.transform.position;
+            Vector3 outward = Vector3.ProjectOnPlane(doorway - house.transform.position, Vector3.up).normalized;
+            if (Vector3.Dot(transform.position - doorway, outward) > 1f) return true;
+        }
+        return false;
     }
 
     private bool AreDoorsClosed()
@@ -720,10 +683,9 @@ public class DailyStoryController : MonoBehaviour
     private IEnumerator NextMorning()
     {
         IsTransitioning = true;
-        dialogueUntil = 0f;
-        sleepReminderUntil = 0f;
-        // Let the player see the resting view before the overnight blackout.
-        yield return new WaitForSecondsRealtime(2f);
+        bedtimeThoughtUntil = Time.unscaledTime + BedtimeThoughtDuration;
+        yield return new WaitForSecondsRealtime(BedtimeThoughtDuration);
+        bedtimeThoughtUntil = 0f;
         ShowSleepOverlay();
         float elapsed = 0f;
         while (elapsed < 2f)
@@ -747,6 +709,7 @@ public class DailyStoryController : MonoBehaviour
         RestoreDaylight();
         // Let the restored environment lighting settle while the screen is still black.
         yield return new WaitForSecondsRealtime(0.5f);
+        GetComponent<TreeChoppingSystem>()?.RefreshChoppedTerrain();
         // Remove the caption first, then reveal the restored morning scene.
         elapsed = 0f;
         while (elapsed < 0.6f)
@@ -769,25 +732,155 @@ public class DailyStoryController : MonoBehaviour
         IsTransitioning = false;
     }
 
+    public void RecordFirstDayStumpCleared()
+    {
+        if (Progress.Day != 2 || redAfternoon || IsTransitioning) return;
+        firstDayStumpsCleared++;
+        if (firstDayStumpsCleared == DailyStoryProgress.RequiredTrees)
+            StartCoroutine(ShowRedAfternoon());
+    }
+
+    private IEnumerator ShowRedAfternoon()
+    {
+        IsTransitioning = true;
+        PT_PlayerMovement movement = GetComponent<PT_PlayerMovement>();
+        bool restoreMovement = movement != null && movement.enabled;
+        if (restoreMovement) movement.enabled = false;
+
+        ShowSleepOverlay();
+        sleepCaption.text = "Chớp mắt cái đã đến buổi chiều.\nCó chuyện gì đó kỳ lạ vừa xảy ra...";
+        yield return FadeAfternoonOverlay(0f, 1f);
+        sleepCaption.color = Color.white;
+        yield return new WaitForSecondsRealtime(4f);
+
+        sleepCaption.color = Color.clear;
+        if (originalSky != null)
+        {
+            nightSky = new Material(originalSky);
+            nightSky.SetColor("_Tint", new Color(0.95f, 0.17f, 0.12f));
+            RenderSettings.skybox = nightSky;
+        }
+        if (sun != null) sun.color = new Color(1f, 0.48f, 0.32f);
+        RenderSettings.fogColor = new Color(0.42f, 0.13f, 0.12f);
+        DynamicGI.UpdateEnvironment();
+        yield return FadeAfternoonOverlay(1f, 0f);
+
+        sleepOverlay.SetActive(false);
+        redAfternoon = true;
+        IsTransitioning = false;
+        if (restoreMovement && movement != null) movement.enabled = true;
+        UpdateStoryLine();
+    }
+
+    private IEnumerator ShowEarthquake()
+    {
+        IsTransitioning = true;
+        PT_PlayerMovement movement = GetComponent<PT_PlayerMovement>();
+        bool restoreMovement = movement != null && movement.enabled;
+        if (restoreMovement) movement.enabled = false;
+
+        Transform cameraTransform = view != null ? view.transform : null;
+        Vector3 rest = cameraTransform != null ? cameraTransform.localPosition : Vector3.zero;
+        ShowSleepOverlay();
+        sleepCaption.color = Color.clear;
+        const float blackoutAt = 2.5f;
+        const float revealAt = 3.5f;
+        const float duration = 5.5f;
+        bool transformed = false;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float opacity = elapsed < revealAt
+                ? Mathf.SmoothStep(0f, 1f, (elapsed - 0.5f) / 2f)
+                : Mathf.SmoothStep(1f, 0f, (elapsed - revealAt) / 2f);
+            sleepBackground.color = new Color(0f, 0f, 0f, opacity);
+            if (cameraTransform != null)
+                cameraTransform.localPosition = rest + new Vector3(
+                    Mathf.Sin(elapsed * 57f), Mathf.Sin(elapsed * 73f), 0f) * (elapsed < revealAt ? 0.09f : 0f);
+
+            if (!transformed && elapsed >= blackoutAt)
+            {
+                transformed = true;
+                ShowBloodMoonNight();
+                GameObject spookyTree = Resources.Load<GameObject>("Spooky Tree");
+                if (spookyTree != null) GetComponent<TreeChoppingSystem>()?.TransformFruitTrees(spookyTree);
+                foreach (Collider stone in FindObjectsByType<Collider>())
+                {
+                    if (stone.name != "PT_Menhir_Rock_02 Collision") continue;
+                    GameObject runeGlow = new GameObject("Rune Glow");
+                    runeGlow.transform.SetParent(stone.transform, false);
+                    runeGlow.transform.position = stone.bounds.center + Vector3.up * stone.bounds.extents.y * 0.55f;
+                    Light glow = runeGlow.AddComponent<Light>();
+                    glow.type = LightType.Point;
+                    glow.color = new Color(0.05f, 0.68f, 1f);
+                    glow.intensity = 2.2f;
+                    glow.range = 3.5f;
+                }
+            }
+            yield return null;
+        }
+        if (cameraTransform != null) cameraTransform.localPosition = rest;
+        sleepOverlay.SetActive(false);
+
+        if (restoreMovement && movement != null) movement.enabled = true;
+        storyLine = "Mình cần thắp sáng căn phòng. Trong kho vẫn còn củi để nhóm lò.";
+        storyLineUntil = Time.unscaledTime + StoryLineDuration;
+        IsTransitioning = false;
+    }
+
+    private void ShowBloodMoonNight()
+    {
+        if (nightSky != null)
+        {
+            if (nightSky.HasProperty("_Tint")) nightSky.SetColor("_Tint", new Color(0.17f, 0.11f, 0.21f));
+            if (nightSky.HasProperty("_Exposure")) nightSky.SetFloat("_Exposure", 0.12f);
+        }
+        if (sun != null)
+        {
+            sun.color = new Color(0.52f, 0.35f, 0.62f);
+            sun.intensity *= 0.15f;
+        }
+        RenderSettings.ambientIntensity *= 0.35f;
+        RenderSettings.fogColor = new Color(0.065f, 0.035f, 0.08f);
+        DynamicGI.UpdateEnvironment();
+
+        Shader shader = Shader.Find("Unlit/Color");
+        if (shader == null) return;
+        Vector3 direction = Quaternion.Euler(0f, 25f, 0f) * transform.forward;
+        direction.y = 0.45f;
+        GameObject moon = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        moon.name = "Blood Moon";
+        float distance = view != null ? Mathf.Min(160f, view.farClipPlane * 0.7f) : 160f;
+        moon.transform.position = transform.position + direction.normalized * distance;
+        moon.transform.localScale = Vector3.one * (distance * 0.1f);
+        moon.GetComponent<Collider>().enabled = false;
+        Renderer renderer = moon.GetComponent<Renderer>();
+        renderer.material = new Material(shader) { color = new Color(0.95f, 0.045f, 0.07f) };
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+    }
+
+    private IEnumerator FadeAfternoonOverlay(float from, float to)
+    {
+        const float duration = 2f;
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            sleepBackground.color = new Color(0f, 0f, 0f, Mathf.SmoothStep(from, to, elapsed / duration));
+            yield return null;
+        }
+    }
+
     private void OnGUI()
     {
-        if (collector == null || IsTransitioning) return;
-        if (!Progress.FurnitureCrafted && craftHits > 0 && Time.time < craftBarUntil)
+        bool showingBedtimeThought = IsTransitioning && Time.unscaledTime < bedtimeThoughtUntil;
+        if (collector == null || (IsTransitioning && !showingBedtimeThought)) return;
+        string subtitleText = showingBedtimeThought ? "Hôm nay khu rừng có gì đó kỳ lạ..." : storyLine;
+        float remaining = (showingBedtimeThought ? bedtimeThoughtUntil : storyLineUntil) - Time.unscaledTime;
+        if (remaining > 0f && !string.IsNullOrEmpty(subtitleText))
         {
-            float width = Mathf.Min(280f, Screen.width * 0.5f);
-            Rect bar = new Rect((Screen.width - width) * 0.5f, Screen.height * 0.5f + 65f, width, 14f);
-            Color previous = GUI.color;
-            GUI.color = new Color(0.08f, 0.08f, 0.08f, 0.85f);
-            GUI.DrawTexture(bar, Texture2D.whiteTexture);
-            GUI.color = new Color(0.9f, 0.65f, 0.2f);
-            GUI.DrawTexture(new Rect(bar.x + 2f, bar.y + 2f,
-                (bar.width - 4f) * craftHits / CraftRequiredHits, bar.height - 4f), Texture2D.whiteTexture);
-            GUI.color = previous;
-        }
-        if (!IsTransitioning && Time.time < dialogueUntil && !string.IsNullOrEmpty(dialogue))
-        {
-            float remaining = dialogueUntil - Time.time;
-            float elapsed = DialogueDuration - remaining;
+            float elapsed = (showingBedtimeThought ? BedtimeThoughtDuration : StoryLineDuration) - remaining;
             float alpha = Mathf.SmoothStep(0f, 1f,
                 Mathf.Clamp01(Mathf.Min(elapsed, remaining) / DialogueFadeDuration));
             float width = Mathf.Min(820f, Screen.width - 40f);
@@ -798,35 +891,9 @@ public class DailyStoryController : MonoBehaviour
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(1f, 1f, 1f, alpha) }
             };
-            float height = subtitle.CalcHeight(new GUIContent(dialogue), width - 32f) + 24f;
+            float height = subtitle.CalcHeight(new GUIContent(subtitleText), width - 32f) + 24f;
             Rect panel = new Rect((Screen.width - width) * 0.5f, Screen.height - 145f - height, width, height);
-            GUI.Label(new Rect(panel.x + 16f, panel.y + 12f, width - 32f, height - 24f), dialogue, subtitle);
-        }
-        if (HasInteractionPrompt)
-        {
-            int cost = Progress.Day == 1 ? DailyStoryProgress.FirewoodCost : DailyStoryProgress.FurnitureCost;
-            int available = Progress.Day == 1 ? Progress.HearthWood : Progress.WorkbenchWood;
-            string prompt = available < cost ? "Cần " + cost + " gỗ (" + available + "/" + cost + ")" :
-                Progress.Day == 1 ? "E — Nhóm lò (3 gỗ)" : "E — Chế tạo ghế (3 gỗ)";
-            if (Target() == woodStorage)
-                prompt = collector.IsCarryingWood ? "E — Cất gỗ | F — Lấy thêm (" + collector.CarriedWoodCount + "/3)"
-                    : "F — Lấy gỗ (Kho: " + Progress.StoredWood + ")";
-            else if (Progress.Day == 1 && Progress.HearthWood < cost)
-                prompt = collector.IsCarryingWood ? "E — Quăng gỗ vào lò (" + Progress.HearthWood + "/3)"
-                    : "Lò: " + Progress.HearthWood + "/3 gỗ — Lấy gỗ từ thùng";
-            else if (Progress.Day == 1 && !Progress.IsNight)
-                prompt = !Progress.AxeReturned ? "Cất rìu lên kệ trước khi trời tối"
-                    : "Cần chặt đủ 3 cây và cất 9 khúc gỗ trước đêm";
-            else if (Progress.Day == 2 && Target() == workbench)
-                prompt = available < cost
-                    ? collector.IsCarryingWood ? "E — Đặt gỗ lên bàn (" + available + "/" + cost + ")" : "Mang gỗ từ kho ra bàn (" + available + "/" + cost + ")"
-                    : reticle != null && reticle.IsHoldingHammer ? "Chuột trái — Dùng búa chế tạo ghế" : "Cần cầm búa để chế tạo ghế";
-            if (Target() == toolShelf) prompt = collector.IsCarryingWood
-                ? "G — Thả gỗ trước (" + collector.CarriedWoodCount + "/3)"
-                : "G — Cất " + reticle.HeldItemTitle.ToLower() + " lên kệ";
-            GUIStyle style = new GUIStyle(GUI.skin.box) { fontSize = 18, alignment = TextAnchor.MiddleCenter };
-            float promptWidth = Mathf.Min(520f, Screen.width - 20f);
-            GUI.Box(new Rect((Screen.width - promptWidth) * 0.5f, Screen.height - 90f, promptWidth, 40f), prompt, style);
+            GUI.Label(new Rect(panel.x + 16f, panel.y + 12f, width - 32f, height - 24f), subtitleText, subtitle);
         }
     }
 }

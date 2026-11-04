@@ -46,12 +46,14 @@ public class FurniturePlacement : MonoBehaviour
     }
     private void Update()
     {
+        ForestWarningNote warning = GetComponent<ForestWarningNote>();
+        if (warning != null && (warning.IsHeld || warning.LastPlacementFrame == Time.frameCount)) return;
         if (view == null || Cursor.lockState != CursorLockMode.Locked || (story != null && story.IsTransitioning)) return;
 #if ENABLE_INPUT_SYSTEM
-        bool pickup = Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
+        bool pickup = Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame;
         bool place = Keyboard.current != null && Keyboard.current.gKey.wasPressedThisFrame;
 #elif ENABLE_LEGACY_INPUT_MANAGER
-        bool pickup = Input.GetKeyDown(KeyCode.E);
+        bool pickup = Input.GetKeyDown(KeyCode.F);
         bool place = Input.GetKeyDown(KeyCode.G);
 #else
         bool pickup = false, place = false;
@@ -59,7 +61,7 @@ public class FurniturePlacement : MonoBehaviour
         if (IsHolding) { if (place) TryPlace(); return; }
         CraftedFurniture target = FindTarget();
         if (!pickup || target == null || (tools != null && tools.IsHoldingItem) ||
-            (wood != null && (wood.IsCarryingWood || wood.IsThrowing))) return;
+            (wood != null && wood.IsThrowing)) return;
         LastInteractionFrame = Time.frameCount;
         held = target.transform;
         HasPickedUpChair = true;
@@ -73,7 +75,7 @@ public class FurniturePlacement : MonoBehaviour
         held.SetParent(view.transform,true);
         held.localRotation=Quaternion.Euler(0f,180f,0f);
         held.localScale *= .65f / Mathf.Max(bounds.size.x,bounds.size.y,bounds.size.z,.01f);
-        held.position += view.transform.TransformPoint(new Vector3(0f,-.25f,1.1f))-BoundsOf(held).center;
+        held.position += view.transform.TransformPoint(new Vector3(.36f,-.25f,1.1f))-BoundsOf(held).center;
     }
     private void TryPlace()
     {
@@ -122,15 +124,5 @@ public class FurniturePlacement : MonoBehaviour
         if(renderers.Length>0) bounds=renderers[0].bounds;
         foreach(Renderer renderer in renderers) bounds.Encapsulate(renderer.bounds);
         return bounds;
-    }
-    private void OnGUI()
-    {
-        if(story!=null && story.IsTransitioning) return;
-        if(!IsHolding && !HasPickupTarget) return;
-        string prompt=IsHolding ? "G — Đặt ghế lên bề mặt trống" :
-            (tools!=null && tools.IsHoldingItem) || (wood!=null && wood.IsCarryingWood)
-            ? "Cất dụng cụ và gỗ trước khi cầm ghế" : "E — Cầm ghế gỗ";
-        GUI.Box(new Rect((Screen.width-420f)*.5f,Screen.height-90f,420f,40f),prompt,
-            new GUIStyle(GUI.skin.box){fontSize=18,alignment=TextAnchor.MiddleCenter});
     }
 }

@@ -166,26 +166,4 @@ public class AxePickupThrow : MonoBehaviour
 #endif
     }
 
-    private void OnGUI()
-    {
-        string prompt = null;
-        bool nearAxe = player != null &&
-                       Vector3.Distance(player.position, transform.position) <= interactionDistance;
-
-        if (state == AxeState.Mounted && nearAxe)
-            prompt = "E - Trang bị rìu";
-        else if (state == AxeState.Held)
-            prompt = "Chuột phải - Ném rìu";
-        else if (state == AxeState.Thrown && nearAxe)
-            prompt = "Chuột phải - Treo rìu lại";
-
-        if (!string.IsNullOrEmpty(prompt))
-        {
-            GUIStyle style = new GUIStyle(GUI.skin.label);
-            style.alignment = TextAnchor.MiddleCenter;
-            style.fontSize = 18;
-            style.normal.textColor = Color.white;
-            GUI.Label(new Rect(Screen.width * 0.5f - 150f, Screen.height - 90f, 300f, 36f), prompt, style);
-        }
-    }
 }

@@ -5,6 +5,7 @@ public class TreeChoppingSystem : MonoBehaviour
 {
     private readonly Dictionary<Terrain, TerrainData> originalData = new Dictionary<Terrain, TerrainData>();
     private readonly Dictionary<Terrain, TerrainData> runtimeData = new Dictionary<Terrain, TerrainData>();
+    private readonly Dictionary<Terrain, List<TreeInstance>> removedTrees = new Dictionary<Terrain, List<TreeInstance>>();
     private GameObject pineStump;
     private GameObject fruitStump;
     private ChoppableTree displayedTree;
@@ -144,7 +145,7 @@ public class TreeChoppingSystem : MonoBehaviour
         ShowStumpTarget(stump);
     }
 
-    public bool RemoveTerrainTree(Terrain terrain, TreeInstance instance)
+    private TerrainData GetRuntimeTerrainData(Terrain terrain)
     {
         if (!runtimeData.TryGetValue(terrain, out TerrainData data))
         {
@@ -155,14 +156,120 @@ public class TreeChoppingSystem : MonoBehaviour
             TerrainCollider collider = terrain.GetComponent<TerrainCollider>();
             if (collider != null) collider.terrainData = data;
         }
+        return data;
+    }
+
+    private readonly List<Transform> spookyTrees = new();
+
+    private void LateUpdate()
+    {
+        foreach (Transform tree in spookyTrees)
+        {
+            if (tree == null) continue;
+            Vector3 direction = Vector3.ProjectOnPlane(transform.position - tree.position, Vector3.up);
+            if (direction.sqrMagnitude > 0.001f)
+                tree.rotation = Quaternion.LookRotation(-direction, Vector3.up);
+        }
+    }
+
+    public void TransformFruitTrees(GameObject replacement)
+    {
+        foreach (Terrain terrain in Terrain.activeTerrains)
+        {
+            TreePrototype[] prototypes = terrain.terrainData.treePrototypes;
+            var remaining = new List<TreeInstance>();
+            foreach (TreeInstance tree in terrain.terrainData.treeInstances)
+            {
+                GameObject prefab = prototypes[tree.prototypeIndex].prefab;
+                if (prefab != null && prefab.name.StartsWith("PT_Fruit_Tree"))
+                {
+                    Vector3 position = terrain.transform.position + Vector3.Scale(tree.position, terrain.terrainData.size);
+                    Quaternion rotation = Quaternion.Euler(0f, tree.rotation * Mathf.Rad2Deg, 0f);
+                    if (SpawnSpookyTree(replacement, position, rotation, 8f * tree.heightScale)) continue;
+                }
+                remaining.Add(tree);
+            }
+            if (remaining.Count == terrain.terrainData.treeInstanceCount) continue;
+            GetRuntimeTerrainData(terrain).SetTreeInstances(remaining.ToArray(), false);
+            terrain.Flush();
+        }
+
+        foreach (Transform tree in FindObjectsByType<Transform>())
+        {
+            if (!tree.name.StartsWith("PT_Fruit_Tree")) continue;
+            if (tree.parent != null && tree.parent.name.StartsWith("PT_Fruit_Tree")) continue;
+            if (SpawnSpookyTree(replacement, tree.position, tree.rotation, 8f))
+                tree.gameObject.SetActive(false);
+        }
+    }
+
+    private bool SpawnSpookyTree(GameObject replacement, Vector3 position, Quaternion rotation, float height)
+    {
+        GameObject spooky = Instantiate(replacement, position, rotation);
+        Renderer[] renderers = spooky.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0)
+        {
+            Destroy(spooky);
+            return false;
+        }
+        Bounds bounds = renderers[0].bounds;
+        foreach (Renderer renderer in renderers) bounds.Encapsulate(renderer.bounds);
+        if (bounds.size.y < 0.0001f)
+        {
+            Destroy(spooky);
+            return false;
+        }
+        float scale = height / bounds.size.y;
+        spooky.transform.localScale *= scale;
+        spooky.transform.position += Vector3.up * ((position.y - bounds.min.y) * scale);
+        GameObject faceGlow = new GameObject("Spooky Face Glow");
+        faceGlow.transform.SetParent(spooky.transform, false);
+        faceGlow.transform.position = position + Vector3.up * (height * 0.24f)
+            - spooky.transform.forward * (height * 0.14f);
+        Light glow = faceGlow.AddComponent<Light>();
+        glow.type = LightType.Point;
+        glow.color = new Color(0.72f, 0.16f, 1f);
+        glow.intensity = 2.2f;
+        glow.range = height * 0.4f;
+        spookyTrees.Add(spooky.transform);
+        return true;
+    }
+
+    public bool RemoveTerrainTree(Terrain terrain, TreeInstance instance)
+    {
+        TerrainData data = GetRuntimeTerrainData(terrain);
         var remaining = new List<TreeInstance>(data.treeInstances);
         int index = remaining.FindIndex(t => t.prototypeIndex == instance.prototypeIndex &&
             (t.position - instance.position).sqrMagnitude < 0.0000000001f);
         if (index < 0) return false;
         remaining.RemoveAt(index);
+        if (!removedTrees.TryGetValue(terrain, out List<TreeInstance> removed))
+        {
+            removed = new List<TreeInstance>();
+            removedTrees.Add(terrain, removed);
+        }
+        removed.Add(instance);
         data.SetTreeInstances(remaining.ToArray(), false);
         terrain.Flush();
         return true;
+    }
+
+    public void RefreshChoppedTerrain()
+    {
+        foreach (var entry in removedTrees)
+        {
+            Terrain terrain = entry.Key;
+            if (terrain == null || !runtimeData.TryGetValue(terrain, out TerrainData data)) continue;
+            var remaining = new List<TreeInstance>(data.treeInstances);
+            remaining.RemoveAll(tree => entry.Value.Exists(removed =>
+                tree.prototypeIndex == removed.prototypeIndex &&
+                (tree.position - removed.position).sqrMagnitude < 0.0000000001f));
+            data.SetTreeInstances(remaining.ToArray(), false);
+            if (terrain.terrainData != data) terrain.terrainData = data;
+            TerrainCollider collider = terrain.GetComponent<TerrainCollider>();
+            if (collider != null && collider.terrainData != data) collider.terrainData = data;
+            terrain.Flush();
+        }
     }
 
     public bool ReplaceWithStump(ChoppableTree tree)
@@ -200,7 +307,10 @@ public class TreeChoppingSystem : MonoBehaviour
         GameObject stump = Instantiate(prefab, position, rotation);
         stump.name = "Chopped Tree Stump";
         stump.transform.localScale = scale;
-        stump.AddComponent<DiggableStump>();
+        DailyStoryController story = GetComponent<DailyStoryController>();
+        stump.AddComponent<DiggableStump>().IsFirstDayObjective =
+            story != null && story.Progress.Day == 1 &&
+            story.Progress.TreesCut < DailyStoryProgress.RequiredTrees;
         if (stump.GetComponentInChildren<Collider>() == null)
         {
             MeshFilter mesh = stump.GetComponentInChildren<MeshFilter>();

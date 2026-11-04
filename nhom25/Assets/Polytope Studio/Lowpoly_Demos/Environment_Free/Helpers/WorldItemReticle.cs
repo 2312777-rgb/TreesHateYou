@@ -14,6 +14,14 @@ public class WorldItemReticle : MonoBehaviour
     [SerializeField] private Camera playerCamera;
     [SerializeField] private float maxDistance = 5.5f;
 
+    private RectTransform crosshair;
+    private void LateUpdate()
+    {
+        ForestWarningNote warning = GetComponent<ForestWarningNote>();
+        if (crosshair != null)
+            crosshair.gameObject.SetActive(warning == null || !warning.IsReading);
+    }
+
     private Renderer axeRenderer;
     private Renderer hammerRenderer;
     private Renderer pickaxeRenderer;
@@ -23,9 +31,22 @@ public class WorldItemReticle : MonoBehaviour
     private Text infoText;
     private Sprite solidSprite;
     private Transform heldItem;
+    public void HideHeldToolForReading(List<Renderer> hiddenRenderers)
+    {
+        if (heldItem == null) return;
+        foreach (Renderer renderer in heldItem.GetComponentsInChildren<Renderer>())
+        {
+            if (renderer.forceRenderingOff) continue;
+            renderer.forceRenderingOff = true;
+            hiddenRenderers.Add(renderer);
+        }
+    }
+
     public bool IsHoldingItem => heldItem != null;
     public bool IsHoldingAxe => heldItem != null && heldItem.name == "Lumberjack_Axe";
     public bool IsHoldingHammer => heldItem != null && heldItem.name == "Lumberjack_Hammer_Display";
+    private bool IsHoldingPickaxe => heldItem != null && heldItem.name == "Lumberjack_Pickaxe_Display";
+    public bool IsPickaxeStored { get; private set; } = true;
     public bool IsHammerStored { get; private set; } = true;
     public string HeldItemTitle => heldItem != null ? GetItemTitle(heldItem.name) : "dụng cụ";
     private struct ShelfPose
@@ -94,6 +115,8 @@ public class WorldItemReticle : MonoBehaviour
 
     private void Update()
     {
+        ForestWarningNote warning = GetComponent<ForestWarningNote>();
+        if (warning != null && (warning.IsHeld || warning.LastPlacementFrame == Time.frameCount)) return;
         FurniturePlacement furniture = GetComponent<FurniturePlacement>();
         if (furniture != null && (furniture.IsHolding || furniture.LastInteractionFrame == Time.frameCount)) return;
         hoveredTitle = null;
@@ -109,7 +132,7 @@ public class WorldItemReticle : MonoBehaviour
                 (!firewoodCollector.IsCarryingWood && firewoodCollector.LastDropFrame != Time.frameCount)))
             {
                 LastReleaseFrame = Time.frameCount;
-                if (story == null || !story.TryStoreHeldTool()) DropItem();
+                DropItem();
             }
             else
             {
@@ -188,6 +211,7 @@ public class WorldItemReticle : MonoBehaviour
     private void PickUpItem(Transform item)
     {
         if (item.name == "Lumberjack_Hammer_Display") IsHammerStored = false;
+        if (item.name == "Lumberjack_Pickaxe_Display") IsPickaxeStored = false;
         if (item.name == "Lumberjack_Axe" && story != null) story.Progress.SetAxeReturned(false);
         LastPickupFrame = Time.frameCount;
         heldItem = item;
@@ -245,10 +269,6 @@ public class WorldItemReticle : MonoBehaviour
             {
                 chopping.DigStump(playerCamera);
             }
-            else if (heldItem.name == "Lumberjack_Hammer_Display" && story != null)
-            {
-                story.HammerWorkbench();
-            }
         }
         Quaternion windup = Quaternion.Euler(-32f, 12f, -18f);
         Quaternion strike = Quaternion.Euler(65f, -22f, 18f);
@@ -292,6 +312,7 @@ public class WorldItemReticle : MonoBehaviour
     {
         if (heldItem == null || !shelfPoses.TryGetValue(heldItem, out ShelfPose pose)) return false;
         if (IsHoldingHammer) IsHammerStored = true;
+        if (IsHoldingPickaxe) IsPickaxeStored = true;
         isSwinging = false;
         chopping.ShowTarget(null);
         heldItem.SetParent(pose.Parent, true);
@@ -332,9 +353,9 @@ public class WorldItemReticle : MonoBehaviour
     private static bool PickupPressed()
     {
 #if ENABLE_INPUT_SYSTEM
-        return Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
+        return Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame;
 #elif ENABLE_LEGACY_INPUT_MANAGER
-        return Input.GetKeyDown(KeyCode.E);
+        return Input.GetKeyDown(KeyCode.F);
 #else
         return false;
 #endif
@@ -418,14 +439,18 @@ public class WorldItemReticle : MonoBehaviour
         solidSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0f, 0f, 1f, 1f),
             new Vector2(0.5f, 0.5f));
 
+        crosshair = new GameObject("Crosshair", typeof(RectTransform)).GetComponent<RectTransform>();
+        crosshair.SetParent(canvas.transform, false);
+        crosshair.anchoredPosition = Vector2.zero;
+
         // Dark edging keeps the fine white crosshair visible on both bright and dark scenes.
-        CreateImage(canvas.transform, "Crosshair Outline Horizontal", new Vector2(20f, 4f),
+        CreateImage(crosshair, "Crosshair Outline Horizontal", new Vector2(20f, 4f),
             Vector2.zero, Color.black);
-        CreateImage(canvas.transform, "Crosshair Outline Vertical", new Vector2(4f, 20f),
+        CreateImage(crosshair, "Crosshair Outline Vertical", new Vector2(4f, 20f),
             Vector2.zero, Color.black);
-        CreateImage(canvas.transform, "White Crosshair Horizontal", new Vector2(16f, 2f),
+        CreateImage(crosshair, "White Crosshair Horizontal", new Vector2(16f, 2f),
             Vector2.zero, Color.white);
-        CreateImage(canvas.transform, "White Crosshair Vertical", new Vector2(2f, 16f),
+        CreateImage(crosshair, "White Crosshair Vertical", new Vector2(2f, 16f),
             Vector2.zero, Color.white);
 
         infoPanel = CreateImage(canvas.transform, "Item Information Background",
@@ -485,26 +510,4 @@ private void UpdateInfoPanel()
             infoText.text = hoveredTitle;
     }
 
-    private void OnGUI()
-    {
-        FurniturePlacement furniture = GetComponent<FurniturePlacement>();
-        if (furniture != null && (furniture.IsHolding || furniture.HasPickupTarget)) return;
-        if (story != null && (story.IsTransitioning || story.HasInteractionPrompt)) return;
-        if (firewoodCollector != null && (firewoodCollector.HasPickupTarget ||
-            (firewoodCollector.IsCarryingWood && !HasToolPickupTarget))) return;
-        if (heldItem == null && string.IsNullOrEmpty(hoveredTitle)) return;
-        if (heldItem != null && doors != null)
-        {
-            foreach (LumberjackDoorInteract door in doors)
-                if (door != null && door.IsInteractionPromptVisible) return;
-        }
-
-        GUIStyle style = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 18,
-            alignment = TextAnchor.MiddleCenter
-        };
-        string prompt = heldItem != null ? "Nhấn G để thả dụng cụ" : "Nhấn E để cầm đồ vật";
-        GUI.Box(new Rect(Screen.width * 0.5f - 110f, Screen.height - 90f, 220f, 40f), prompt, style);
-    }
 }

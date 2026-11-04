@@ -39,6 +39,8 @@ public class FirewoodCollector : MonoBehaviour
     private CollectibleFirewood FindTarget()
     {
         if (playerCamera == null || CarriedWoodCount >= MaxCarriedWood || IsThrowing) return null;
+        if (story != null && story.Progress.Day == 1 &&
+            (story.Progress.TreesCut < DailyStoryProgress.RequiredTrees || !story.Progress.AxeReturned)) return null;
         Ray ray = playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
         RaycastHit[] hits = Physics.RaycastAll(ray, 2.5f, Physics.DefaultRaycastLayers,
             QueryTriggerInteraction.Ignore);
@@ -54,6 +56,8 @@ public class FirewoodCollector : MonoBehaviour
 
     private void Update()
     {
+        ForestWarningNote warning = GetComponent<ForestWarningNote>();
+        if (warning != null && (warning.IsHeld || warning.LastPlacementFrame == Time.frameCount)) return;
         FurniturePlacement furniture = GetComponent<FurniturePlacement>();
         if (furniture != null && (furniture.IsHolding || furniture.LastInteractionFrame == Time.frameCount)) return;
         if (story == null) story = GetComponent<DailyStoryController>();
@@ -71,7 +75,8 @@ public class FirewoodCollector : MonoBehaviour
         WorldItemReticle tool = GetComponent<WorldItemReticle>();
         if (IsCarryingWood && drop) { DropWood(); return; }
         target = FindTarget();
-        if (pressed && target != null && (tool == null || tool.LastPickupFrame != Time.frameCount)) PickUp(target);
+        if (pressed && target != null && (tool == null ||
+            (!tool.HasToolPickupTarget && tool.LastPickupFrame != Time.frameCount))) PickUp(target);
     }
 
     private void PickUp(CollectibleFirewood wood)
@@ -216,18 +221,4 @@ public class FirewoodCollector : MonoBehaviour
         IsThrowing = false;
     }
 
-    private void OnGUI()
-    {
-        if (story != null && (story.HasInteractionPrompt || story.IsTransitioning)) return;
-        if (!HasPickupTarget && !IsCarryingWood) return;
-        GUIStyle style = new GUIStyle(GUI.skin.box) { fontSize = 18, alignment = TextAnchor.MiddleCenter };
-        WorldItemReticle tool = GetComponent<WorldItemReticle>();
-        if (IsCarryingWood && tool != null && tool.HasToolPickupTarget) return;
-        string prompt = IsThrowing ? "Đang quăng gỗ vào thùng..." : IsCarryingWood
-            ? "G — Thả gỗ trước"
-            : "F — Cầm gỗ (tay trái)";
-        if (!IsThrowing && HasPickupTarget) prompt = "F — Cầm gỗ | G — Thả gỗ";
-        if (IsCarryingWood) prompt += " (" + CarriedWoodCount + "/" + MaxCarriedWood + ")";
-        GUI.Box(new Rect(Screen.width * 0.5f - 175f, Screen.height - 90f, 350f, 40f), prompt, style);
-    }
 }

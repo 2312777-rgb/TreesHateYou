@@ -192,6 +192,7 @@ public class BedRestInteraction : MonoBehaviour
         if (mouseLook != null) mouseLook.enabled = mouseLookWasEnabled;
 
         isResting = false;
+        player.GetComponent<DailyStoryController>()?.OnPlayerLeftBed();
     }
 
     private bool TryFindBedsidePosition(out Vector3 position)
@@ -260,33 +261,6 @@ public class BedRestInteraction : MonoBehaviour
         return new Bounds(transform.position, Vector3.one);
     }
 
-    private void OnGUI()
-    {
-        if (!isResting && itemReticle != null && itemReticle.IsHoldingItem) return;
-        FirewoodCollector wood = player != null ? player.GetComponent<FirewoodCollector>() : null;
-        if (!isResting && wood != null && (wood.IsCarryingWood || wood.IsThrowing)) return;
-
-        if (player == null || playerCamera == null || (!isResting && !IsPlayerNearBed()))
-        {
-            return;
-        }
-
-        string message = isResting
-            ? "SPACE  -  Rời khỏi giường"
-            : "E  -  Nằm nghỉ";
-        DailyStoryController story = player.GetComponent<DailyStoryController>();
-        if (story != null && story.IsTransitioning) return;
-        if (!isResting && story != null && story.HasInteractionPrompt) return;
-        if (!isResting && story != null && story.Progress.CanSleepToNextDay)
-            message = "E  -  Ngủ sang ngày 2";
-        GUIStyle style = new GUIStyle(GUI.skin.box)
-        {
-            alignment = TextAnchor.MiddleCenter,
-            fontSize = 18,
-            fontStyle = FontStyle.Bold
-        };
-        GUI.Box(new Rect((Screen.width - 300f) * 0.5f, Screen.height - 100f, 300f, 42f), message, style);
-    }
 
     private void OnDisable()
     {

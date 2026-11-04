@@ -61,7 +61,7 @@ Material:
     - _DECALEMISSIONONOFF: 1
     - _DECALSONOFF: 1
     - _DETAILTEXTUREONOFF: 1
-    - _DecalEmissionIntensity: 4.44
+    - _DecalEmissionIntensity: 12
     - _DecalsOnOff: 1
     - _DetailTextureONOFF: 1
     - _DetailTextureONOFF1: 1

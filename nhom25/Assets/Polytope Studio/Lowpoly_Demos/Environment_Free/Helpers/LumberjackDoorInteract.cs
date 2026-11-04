@@ -60,18 +60,6 @@ public class LumberjackDoorInteract : MonoBehaviour
         }
     }
 
-    private void OnGUI()
-    {
-        if (!IsInteractionPromptVisible)
-            return;
-
-        GUIStyle style = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 18,
-            alignment = TextAnchor.MiddleCenter
-        };
-        GUI.Box(new Rect(Screen.width * 0.5f - 110f, Screen.height - 90f, 220f, 40f), "Nhấn E để mở / đóng cửa", style);
-    }
 
     private static bool InteractPressed()
     {
